@@ -1,0 +1,30 @@
+name: 每日自动生成拓客日报
+
+on:
+  schedule:
+    # 每天北京时间早上 6:00 自动运行
+    - cron: '22 22 * * *'
+  workflow_dispatch:  # 允许您手动点击运行
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+      
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: 运行脚本生成日报
+        run: python beisen_daily.py
+        
+      - name: 部署到 GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_branch: gh-pages
+          keep_files: false
