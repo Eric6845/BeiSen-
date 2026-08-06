@@ -621,7 +621,7 @@ def render_card(comp, level):
 if __name__ == "__main__":
     html_content = generate_html_report()
     today_str = datetime.now().strftime("%Y%m%d")
-    filename = f"北森拓客日报_{today_str}.html"
+    filename = "index.html"
     with open(filename, "w", encoding="utf-8") as f:
         f.write(html_content)
     print(f"✅ 日报已生成：{filename}")
