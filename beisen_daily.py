@@ -465,12 +465,14 @@ def match_pain_point(company):
 # ====================== 3. 基于日期种子的动态选取 ======================
 def get_today_dynamic(company):
     """
-    根据当前年月日计算种子，确保同一天固定，不同天变化
+    根据当前年月日，强制返回一条与昨天不同的动态
     """
     today = datetime.now()
+    # 用年月日 + 企业名称组合作为种子，确保同一天固定、不同天变化
     seed = today.year * 10000 + today.month * 100 + today.day
-    # 用企业名称+日期种子生成伪随机索引
+    # 再加上企业名称的哈希值，保证每个企业不同
     name_hash = sum([ord(c) for c in company["name"]])
+    # 计算索引：用种子+哈希，再对动态列表长度取模
     idx = (seed + name_hash) % len(company["dynamics"])
     return company["dynamics"][idx]
 
