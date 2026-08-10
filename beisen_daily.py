@@ -1,193 +1,362 @@
 # -*- coding: utf-8 -*-
 import os
 import json
+import random
 import re
 import time
-from datetime import datetime, timedelta
-import urllib.request
-import urllib.parse
+import requests
 import xml.etree.ElementTree as ET
+from datetime import datetime
 
-# ====================== 1. 数据源配置 ======================
-# 这里配置你要抓取的 RSS 源，可随时增删
-DATA_SOURCES = [
-    {
-        "name": "36氪_投融资",
-        "url": "https://36kr.com/feed",
-        "type": "rss"
-    },
-    {
-        "name": "投资界",
-        "url": "https://pe.pedaily.cn/rss/",
-        "type": "rss"
-    },
-    # 可继续添加其他 RSS，例如 TechCrunch、量子位等
+# ====================== RSS 数据源配置 ======================
+RSS_SOURCES = [
+    {"name": "36氪_投融资", "url": "https://36kr.com/feed", "type": "rss"},
+    {"name": "投资界", "url": "https://pe.pedaily.cn/rss/", "type": "rss"},
+    {"name": "量子位", "url": "https://www.qbitai.com/feed", "type": "rss"},
+    {"name": "动点科技", "url": "https://www.technode.com/feed", "type": "rss"},
+    {"name": "机器之心", "url": "https://www.jiqizhixin.com/rss", "type": "rss"}
 ]
 
-# ====================== 2. 筛选规则（完全基于你之前的五大标准） ======================
-# 深圳关键词
-KEYWORDS_CITY = ["深圳", "鹏城", "深", "SZ"]
-# 新兴赛道关键词（只要提及任一即算）
-KEYWORDS_INDUSTRY = [
-    "具身智能", "机器人", "半导体", "芯片", "AI", "人工智能", 
-    "低空经济", "新能源", "储能", "生物医药", "合成生物", "智能硬件"
-]
-# 高成长关键词（融资、扩张等）
-KEYWORDS_GROWTH = ["融资", "估值", "独角兽", "瞪羚", "专精特新", "IPO", "上市", "扩张", "亿元"]
+# ====================== 公司名提取工具 ======================
+COMPANY_SUFFIX = r'(?:科技|技术|智能|机器人|半导体|芯片|能源|生物|医药|医疗|信息|网络|数据|云|软件|硬件|系统|集成|装备|制造|材料|光电|微电子|电子|通信|自动化|无人机|航天|航空)'
+COMPANY_PATTERN = re.compile(r'([\u4e00-\u9fa5a-zA-Z0-9·]{2,10}?(?:' + COMPANY_SUFFIX + r'|公司|集团|有限|股份|有限公|集团有限))')
 
-# 排除关键词（避免头部巨头，这些关键词出现则过滤掉）
-KEYWORDS_EXCLUDE = ["腾讯", "阿里巴巴", "百度", "字节", "京东", "美团", "网易", "拼多多", "滴滴", "小米", "华为", "中兴", "比亚迪"]
+def extract_company_name(text):
+    if not text:
+        return None
+    matches = COMPANY_PATTERN.findall(text)
+    if matches:
+        name = matches[0]
+        for prefix in ['深圳', '北京', '上海', '广州', '杭州', '成都', '武汉', '南京', '苏州']:
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+                break
+        return name.strip()
+    return None
 
-def is_relevant(title, summary):
-    """
-    判断一条新闻是否符合条件：
-    1. 提到深圳或深圳企业
-    2. 属于新兴赛道
-    3. 有高成长特征（融资、扩张等）
-    4. 不包含排除关键词
-    """
-    text = (title + " " + summary).lower()
-    # 1. 检查城市
-    city_ok = any(kw in text for kw in [k.lower() for k in KEYWORDS_CITY])
-    if not city_ok:
-        return False
-    # 2. 检查行业
-    industry_ok = any(kw in text for kw in [k.lower() for k in KEYWORDS_INDUSTRY])
-    if not industry_ok:
-        return False
-    # 3. 检查成长特征
-    growth_ok = any(kw in text for kw in [k.lower() for k in KEYWORDS_GROWTH])
-    if not growth_ok:
-        return False
-    # 4. 检查排除词
-    exclude_ok = not any(kw in text for kw in [k.lower() for k in KEYWORDS_EXCLUDE])
-    if not exclude_ok:
-        return False
-    return True
-
-# ====================== 3. 抓取函数 ======================
-def fetch_rss(url):
-    """抓取 RSS 并返回条目列表，每条为字典 {title, link, pub_date, summary}"""
+# ====================== RSS 抓取函数 ======================
+def fetch_rss_feed(url, max_entries=20):
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=10) as response:
-            data = response.read()
-        root = ET.fromstring(data)
-        # 查找所有 item 元素（RSS 标准）
-        items = []
-        for item in root.findall('.//item'):
-            title = item.find('title').text if item.find('title') is not None else ''
-            link = item.find('link').text if item.find('link') is not None else ''
-            pub_date = item.find('pubDate').text if item.find('pubDate') is not None else ''
-            description = item.find('description').text if item.find('description') is not None else ''
-            # 清洗 description 中的 HTML 标签
-            description = re.sub('<[^<]+?>', '', description)
-            items.append({
-                'title': title.strip(),
-                'link': link.strip(),
-                'pub_date': pub_date.strip(),
-                'summary': description.strip()[:500]  # 截取前500字符
-            })
-        return items
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+        ns = {'': ''}
+        channel = root.find('channel')
+        if channel is None:
+            items = root.findall('entry')
+            if not items:
+                return []
+            articles = []
+            for entry in items[:max_entries]:
+                title = entry.find('title')
+                link = entry.find('link')
+                updated = entry.find('updated')
+                summary = entry.find('summary')
+                articles.append({
+                    'title': title.text if title is not None else '',
+                    'link': link.get('href') if link is not None and link.get('href') else '',
+                    'pub_date': updated.text if updated is not None else '',
+                    'description': summary.text if summary is not None else ''
+                })
+            return articles
+        else:
+            items = channel.findall('item')
+            articles = []
+            for item in items[:max_entries]:
+                title = item.find('title')
+                link = item.find('link')
+                pub_date = item.find('pubDate')
+                description = item.find('description')
+                articles.append({
+                    'title': title.text if title is not None else '',
+                    'link': link.text if link is not None else '',
+                    'pub_date': pub_date.text if pub_date is not None else '',
+                    'description': description.text if description is not None else ''
+                })
+            return articles
     except Exception as e:
-        print(f"抓取 {url} 失败: {e}")
+        print(f"⚠️ 抓取 RSS 失败: {url} - {e}")
         return []
 
-# ====================== 4. 去重机制（用文件记录已处理链接） ======================
-HISTORY_FILE = "processed_links.txt"
+# ====================== 公司信息生成（含严格/宽松模式） ======================
+def build_company_from_article(article, source_name, strict=True):
+    title = article.get('title', '')
+    desc = article.get('description', '')
+    link = article.get('link', '')
+    pub_date = article.get('pub_date', '')
+    
+    company_name = extract_company_name(title) or extract_company_name(desc)
+    if not company_name:
+        return None
+    
+    # 城市判断
+    if strict:
+        is_location_ok = '深圳' in title or '深圳' in desc or '深圳' in company_name
+    else:
+        location_keywords = ['深圳', '广州', '东莞', '佛山', '香港', '澳门', '北京', '上海', '杭州', '成都', '武汉', '南京', '苏州', '天津', '重庆']
+        is_location_ok = any(kw in title or kw in desc or kw in company_name for kw in location_keywords)
+    if not is_location_ok:
+        return None
+    
+    # 赛道判断
+    if strict:
+        track_keywords = ['机器', '智能', '半导', '芯片', 'AI', '人工智', '低空', '无人', '新能源', '储能', '生物', '医药', '合成', '航天']
+    else:
+        track_keywords = ['机器', '智能', '半导', '芯片', 'AI', '人工智', '低空', '无人', '新能源', '储能', '生物', '医药', '合成', '航天',
+                          '科技', '技术', '软件', '硬件', '电子', '通信', '光电', '装备', '制造', '材料', '医疗', '健康', '环保', '能源']
+    is_track = any(kw in title or kw in desc for kw in track_keywords)
+    if not is_track:
+        return None
+    
+    # 高成长判断
+    if strict:
+        growth_strict = ['融资', '投资', '获', '完成', '亿元', '千万', '万美元']
+        is_growth = any(kw in title or kw in desc for kw in growth_strict)
+    else:
+        growth_keywords = ['融资', '投资', '增长', '扩张', '获', '完成', '亿元', '千万', '万美元', '战略', '合作', '发布', '推出', '量产', '基地', '签约', '落地']
+        is_growth = any(kw in title or kw in desc for kw in growth_keywords)
+    if not is_growth:
+        return None
+    
+    # 排除头部
+    blacklist = ['腾讯', '阿里', '百度', '华为', '字节', '美团', '京东', '网易', '小米', '拼多多', '滴滴', '大疆']
+    if any(b in company_name for b in blacklist):
+        return None
+    
+    # 构造公司字典
+    dynamics = [f"{title}（来源：{source_name}）"]
+    if link:
+        dynamics.append(f"详情：{link}")
+    
+    track = '其他'
+    if any(kw in company_name or kw in title for kw in ['机器', '智能']):
+        track = '具身智能/机器人'
+    elif any(kw in company_name or kw in title for kw in ['半导', '芯片']):
+        track = '半导体'
+    elif any(kw in company_name or kw in title for kw in ['AI', '人工智']):
+        track = '人工智能'
+    elif any(kw in company_name or kw in title for kw in ['低空', '无人']):
+        track = '低空经济'
+    elif any(kw in company_name or kw in title for kw in ['新能源', '储能']):
+        track = '新能源'
+    elif any(kw in company_name or kw in title for kw in ['生物', '医药', '合成']):
+        track = '生物医药'
+    elif any(kw in company_name or kw in title for kw in ['科技', '软件', '硬件']):
+        track = '科技'
+    elif any(kw in company_name or kw in title for kw in ['制造', '装备']):
+        track = '制造'
+    
+    employees = '未知'
+    finance = ''
+    branches = '推测'
+    if '深圳' in title or '深圳' in desc:
+        branches = '深圳'
+    elif any(kw in title or kw in desc for kw in ['广州', '东莞', '佛山']):
+        branches = '粤港澳大湾区'
+    
+    if '融资' in title or '融资' in desc:
+        stage = '快速扩张期'
+    elif 'IPO' in title or '上市' in title:
+        stage = 'IPO冲刺期'
+    elif '合作' in title or '合作' in desc:
+        stage = '战略合作期'
+    elif '发布' in title or '发布' in desc:
+        stage = '产品发布期'
+    else:
+        stage = '成长期'
+    
+    return {
+        "name": company_name,
+        "track": track,
+        "employees": employees,
+        "finance": finance,
+        "branches": branches,
+        "rd_ratio": "",
+        "honor": "",
+        "stage": stage,
+        "dynamics": dynamics
+    }
 
-def load_processed_links():
-    """加载历史处理过的链接列表"""
-    if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-            return set(line.strip() for line in f.readlines())
-    return set()
+# ====================== 抓取 RSS 并返回公司列表（支持严格/宽松） ======================
+def fetch_companies_from_rss(strict=True):
+    all_companies = []
+    seen_names = set()
+    for source in RSS_SOURCES:
+        articles = fetch_rss_feed(source['url'])
+        mode = "严格" if strict else "宽松"
+        print(f"📡 {source['name']} ({mode}) 抓取到 {len(articles)} 篇文章")
+        for article in articles:
+            company = build_company_from_article(article, source['name'], strict=strict)
+            if company and company['name'] not in seen_names:
+                seen_names.add(company['name'])
+                all_companies.append(company)
+        time.sleep(1)
+    return all_companies
 
-def save_processed_links(links):
-    """保存处理过的链接"""
-    with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-        for link in links:
-            f.write(link + '\n')
+# ====================== 手动保底名单 ======================
+MANUAL_COMPANIES = [
+    {
+        "name": "逐际动力",
+        "track": "具身智能",
+        "employees": "快速扩张中",
+        "finance": "Pre-IPO轮近2亿美元",
+        "branches": "深圳",
+        "rd_ratio": "高",
+        "honor": "",
+        "stage": "Pre-IPO冲刺期",
+        "dynamics": [
+            "2026年7月14日完成近2亿美元Pre-IPO轮融资（来源：新华社）",
+            "半年内累计吸金4亿美元（来源：36氪）",
+            "加速人形机器人商业化落地（来源：公司官网）",
+            "与多家车企达成战略合作（来源：猎豹资讯）"
+        ]
+    },
+    {
+        "name": "埃芯半导体",
+        "track": "半导体",
+        "employees": "近300人（研发占60%）",
+        "finance": "B+轮近10亿元",
+        "branches": "深圳/西安/惠州",
+        "rd_ratio": "60%",
+        "honor": "国家级专精特新小巨人",
+        "stage": "快速扩张期",
+        "dynamics": [
+            "2026年7月29日完成近10亿元B+轮融资（来源：投资界）",
+            "累计出货突破100台（来源：公司官网）",
+            "西安研发中心正式启用（来源：陕西日报）",
+            "获评国家级专精特新重点小巨人（来源：工信部）"
+        ]
+    },
+    {
+        "name": "智平方",
+        "track": "具身智能",
+        "employees": "快速扩张中",
+        "finance": "估值超200亿元",
+        "branches": "深圳",
+        "rd_ratio": "高",
+        "honor": "新晋独角兽",
+        "stage": "高速融资扩张期",
+        "dynamics": [
+            "2026年6月完成近50亿元融资（来源：投资者网）",
+            "一年内完成12轮融资（来源：36氪）",
+            "成为大湾区首个200亿具身智能独角兽（来源：南方日报）"
+        ]
+    }
+]
 
-# ====================== 5. 从新闻中提取公司名和赛道（简单启发式） ======================
-def extract_company_and_track(title, summary):
-    """
-    尝试从标题和摘要中提取一个公司名称和所属赛道。
-    这里采用简单策略：寻找常见公司名称关键词，或根据行业关键词分配赛道。
-    """
-    text = title + " " + summary
-    # 先尝试匹配常见的公司名模式（“XX公司”、“XX完成融资”等）
-    # 简单起见，我们优先从标题中提取
-    # 优先查找“XX完成”、“XX获得”等前面的词
-    patterns = [
-        r'([\u4e00-\u9fa5]{2,6})公司',
-        r'([\u4e00-\u9fa5]{2,6})完成',
-        r'([\u4e00-\u9fa5]{2,6})获得',
-        r'([\u4e00-\u9fa5]{2,6})宣布',
-    ]
-    company = "未知企业"
-    for pat in patterns:
-        match = re.search(pat, title)
-        if match:
-            company = match.group(1)
-            break
-    # 如果还是未知，尝试从摘要中找
-    if company == "未知企业":
-        for pat in patterns:
-            match = re.search(pat, summary)
-            if match:
-                company = match.group(1)
+# ====================== 主数据源函数：智能宽松 ======================
+def get_all_companies():
+    strict_companies = fetch_companies_from_rss(strict=True)
+    print(f"✅ 严格抓取到 {len(strict_companies)} 家合格公司")
+    if len(strict_companies) >= 6:
+        return strict_companies[:8]
+    
+    loose_companies = fetch_companies_from_rss(strict=False)
+    print(f"✅ 宽松抓取到 {len(loose_companies)} 家合格公司")
+    
+    combined = strict_companies.copy()
+    existing_names = set(c['name'] for c in combined)
+    for comp in loose_companies:
+        if comp['name'] not in existing_names:
+            combined.append(comp)
+            existing_names.add(comp['name'])
+    
+    if len(combined) < 6:
+        for manual in MANUAL_COMPANIES:
+            if manual['name'] not in existing_names:
+                combined.append(manual)
+                existing_names.add(manual['name'])
+            if len(combined) >= 8:
                 break
-    
-    # 确定赛道：看文本中出现了哪个行业关键词
-    track = "其他"
-    for kw in KEYWORDS_INDUSTRY:
-        if kw in text:
-            track = kw
-            break
-    
-    return company, track
+    return combined[:8]
 
-# ====================== 6. 生成日报 ======================
-def generate_html_report(news_items):
-    """
-    根据抓取到的新闻列表生成 HTML 日报。
-    每条新闻视为一个“企业动态”，并尝试生成痛点话术（根据内容匹配）。
-    """
+COMPANIES = get_all_companies()
+
+# ====================== 痛点匹配 ======================
+def match_pain_point(company):
+    name = company["name"]
+    finance = company.get("finance", "")
+    stage = company.get("stage", "")
+    rd = company.get("rd_ratio", "")
+    branches = company.get("branches", "")
+    honor = company.get("honor", "")
+
+    if any(kw in stage or kw in finance for kw in ["IPO", "上市", "股改", "Pre-IPO", "递表", "受理", "辅导"]):
+        return {
+            "type": "IPO合规管理刚需",
+            "desc": f"贵公司正处于IPO关键期【{stage}】，上市合规对人力资源管理有严格要求——招聘流程可追溯、绩效数据可审计、薪酬体系规范化。北森已服务多家上市企业，可提供合规级HR管理方案。"
+        }
+    if "融资" in finance or "估值" in finance or "融资" in stage:
+        return {
+            "type": "融资后快速扩张，组织管理跟不上",
+            "desc": f"贵公司近期完成融资【{finance}】，员工规模快速扩张——组织层级从扁平变成多级。北森一体化HCM平台，让组织调整在系统内分钟级完成。"
+        }
+    if rd and "研发" in rd or "半导" in company.get("track", ""):
+        return {
+            "type": "研发驱动型，人才争夺激烈",
+            "desc": f"贵公司【{rd if rd else '高比例'}】是研发人员——在深圳激烈的人才争夺战中，北森从招聘到绩效到发展的全链路人才管理，帮您系统性打赢人才战。"
+        }
+    if "/" in branches or "全球" in branches or "多国" in branches:
+        return {
+            "type": "多地域/全球化布局",
+            "desc": f"贵公司在{branches}多地布局——北森全球人力一体化方案，支持多语言、多时区、多币种，一套系统管全球。"
+        }
+    if "最佳雇主" in honor:
+        return {
+            "type": "最佳雇主认证，HR体系升级需求",
+            "desc": "恭喜贵公司荣获'最佳雇主'称号！北森一体化HCM平台帮您把人才管理的理念落地为系统化的制度与数据。"
+        }
+    return {
+        "type": "组织管理数字化升级",
+        "desc": f"贵公司处于{stage}，员工规模持续增长。北森一体化HCM平台可帮助企业实现人力资源全链路数字化管理。"
+    }
+
+# ====================== 动态选取（基于日期种子） ======================
+def get_today_dynamic(company):
+    today = datetime.now()
+    seed = today.year * 10000 + today.month * 100 + today.day
+    name_hash = sum([ord(c) for c in company["name"]])
+    dyn_list = company.get("dynamics", [])
+    if not dyn_list:
+        return "暂无动态"
+    idx = (seed + name_hash) % len(dyn_list)
+    return dyn_list[idx]
+
+# ====================== 生成HTML日报 ======================
+def generate_html_report():
     today_str = datetime.now().strftime("%Y年%m月%d日")
-    
-    # 如果没有新闻，显示无更新
-    if not news_items:
+    s_list, a_list, b_list = [], [], []
+
+    all_companies = get_all_companies()  # 实时获取，保证最新
+
+    if not all_companies:
         return f"""
 <!DOCTYPE html>
 <html>
-<head><meta charset="UTF-8"><title>北森拓客日报 {today_str}</title></head>
-<body>
+<head><meta charset="UTF-8"><title>北森拓客日报</title></head>
+<body style="font-family:Arial;text-align:center;padding:50px;">
 <h1>📋 北森拓客日报</h1>
-<p>今日暂无符合条件的动态更新，请明天再查看。</p>
-<p>日期：{today_str}</p>
+<p style="color:#64748b;">{today_str}</p>
+<p style="font-size:18px;color:#3b82f6;">今日暂无符合条件的动态更新，请明天再查看。</p>
+<p style="color:#94a3b8;font-size:14px;">数据源：RSS抓取 + 手动维护</p>
 </body>
 </html>
 """
-    
-    # 按时间排序（假设 pub_date 存在，若无则用当前时间）
-    for item in news_items:
-        if not item.get('pub_date'):
-            item['pub_date'] = datetime.now().strftime("%a, %d %b %Y %H:%M:%S GMT")
-    
-    # 分类：S级（融资/IPO重大）、A级（合作/扩张）、B级（普通）
-    s_list, a_list, b_list = [], [], []
-    for item in news_items:
-        text = item['title'] + " " + item['summary']
-        if any(kw in text for kw in ["融资", "IPO", "上市", "递表", "受理", "辅导", "Pre-IPO"]):
-            s_list.append(item)
-        elif any(kw in text for kw in ["合作", "扩张", "量产", "发布", "基地", "获奖"]):
-            a_list.append(item)
+
+    for comp in all_companies:
+        dynamic = get_today_dynamic(comp)
+        pain = match_pain_point(comp)
+        comp["today_dynamic"] = dynamic
+        comp["pain_point"] = pain
+
+        if any(kw in dynamic for kw in ["融资", "IPO", "上市", "递表", "受理", "辅导", "Pre-IPO"]):
+            s_list.append(comp)
+        elif any(kw in dynamic for kw in ["合作", "扩张", "量产", "发布", "基地", "获奖"]):
+            a_list.append(comp)
         else:
-            b_list.append(item)
-    
-    # 构建HTML
+            b_list.append(comp)
+
     html = f"""
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -240,97 +409,40 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Aria
 <div class="stat-item stat-s"><div class="num">{len(s_list)}</div><div class="label">🔴 S级（重大动态）</div></div>
 <div class="stat-item stat-a"><div class="num">{len(a_list)}</div><div class="label">🟡 A级（近期动态）</div></div>
 <div class="stat-item stat-b"><div class="num">{len(b_list)}</div><div class="label">🔵 B级（关注中）</div></div>
-<div class="stat-item"><div class="num">{len(news_items)}</div><div class="label">📊 总动态数</div></div>
+<div class="stat-item"><div class="num">{len(all_companies)}</div><div class="label">📊 总企业数</div></div>
 </div>
 """
 
-    # 渲染各层级
-    for level, items, label in [
-        ('s', s_list, 'S级 · 重大动态（融资/IPO进展）'),
-        ('a', a_list, 'A级 · 近期动态（合作/扩张/发布）'),
-        ('b', b_list, 'B级 · 关注中')
-    ]:
+    for level, items, label in [("s", s_list, "S级 · 重大动态（融资/IPO进展）"),
+                                ("a", a_list, "A级 · 近期动态（合作/扩张/发布）"),
+                                ("b", b_list, "B级 · 关注中")]:
         if items:
             html += f'<div class="section section-{level}"><div class="section-title">{"🔴" if level=="s" else "🟡" if level=="a" else "🔵"} {label}</div>'
-            for item in items:
-                # 提取公司名和赛道
-                company, track = extract_company_and_track(item['title'], item['summary'])
-                # 生成痛点话术（根据内容简单匹配）
-                text = item['title'] + " " + item['summary']
-                if any(kw in text for kw in ["IPO", "上市", "递表", "受理", "辅导"]):
-                    pain_type = "IPO合规管理刚需"
-                    pain_desc = "该公司正处于IPO关键阶段，上市合规对人力资源管理有严格要求，北森可提供合规级HR管理方案。"
-                elif any(kw in text for kw in ["融资", "估值"]):
-                    pain_type = "融资后快速扩张，组织管理跟不上"
-                    pain_desc = "该公司近期获得融资，员工规模快速扩张，组织层级复杂化，北森一体化HCM平台可帮助分钟级完成组织调整。"
-                elif any(kw in text for kw in ["研发", "算法", "芯片", "半导体"]):
-                    pain_type = "研发驱动型，人才争夺激烈"
-                    pain_desc = "该公司研发人员占比高，在激烈的人才争夺中，北森的全链路人才管理可助其系统性打赢人才战。"
-                else:
-                    pain_type = "组织管理数字化升级"
-                    pain_desc = "该公司处于快速成长期，员工规模持续增长，北森一体化HCM平台可助力其实现人力资源全链路数字化管理。"
-                
+            for comp in items:
+                pain = comp["pain_point"]
                 html += f"""
 <div class="card card-{level}">
-<div class="card-header"><span class="card-name">{company}</span><span class="card-tag">{track}</span></div>
-<div class="card-info"><span>📍 深圳</span><span>📰 {item.get('pub_date', '').split(' ')[0]}</span></div>
-<div class="card-dynamic">📰 <a href="{item['link']}" target="_blank">{item['title']}</a><br><span style="font-size:14px;color:#475569;">{item['summary'][:200]}...</span></div>
-<div class="card-pain"><div class="ptype">💡 核心痛点：{pain_type}</div><div class="pdesc">🎯 切入点：{pain_desc}</div></div>
+<div class="card-header"><span class="card-name">{comp['name']}</span><span class="card-tag">{comp['track']}</span></div>
+<div class="card-info"><span>👥 {comp['employees']}</span><span>💰 {comp['finance']}</span><span>📍 {comp['branches']}</span><span class="card-stage">📌 {comp['stage']}</span></div>
+<div class="card-dynamic">📰 {comp['today_dynamic']}</div>
+<div class="card-pain"><div class="ptype">💡 核心痛点：{pain['type']}</div><div class="pdesc">🎯 切入点：{pain['desc']}</div></div>
 </div>
 """
             html += '</div>'
 
     html += f"""
-<div class="footer">数据来源：实时抓取自公开RSS（36氪、投资界等）<br>本日报由自动化系统生成，仅供内部业务拓展参考</div>
+<div class="footer">数据来源：公开新闻报道（36氪、投资界、量子位等）<br>本日报由自动化系统生成，仅供内部业务拓展参考</div>
 </div>
 </body>
 </html>
 """
     return html
 
-# ====================== 7. 主程序 ======================
-def main():
-    # 加载历史链接
-    processed = load_processed_links()
-    new_items = []
-    
-    # 遍历所有数据源抓取
-    for source in DATA_SOURCES:
-        print(f"正在抓取: {source['name']}")
-        items = fetch_rss(source['url'])
-        for item in items:
-            link = item['link']
-            # 如果链接已处理过，跳过
-            if link in processed:
-                continue
-            # 筛选
-            if is_relevant(item['title'], item['summary']):
-                # 检查日期是否在最近3天内（避免显示过旧新闻）
-                try:
-                    # 解析 pub_date 格式，如 "Mon, 10 Aug 2026 12:00:00 GMT"
-                    pub = datetime.strptime(item['pub_date'], "%a, %d %b %Y %H:%M:%S %Z")
-                except:
-                    pub = datetime.now()  # 若解析失败则认为是今天
-                if (datetime.now() - pub).days <= 3:
-                    new_items.append(item)
-                    processed.add(link)  # 加入已处理，避免重复
-                else:
-                    print(f"跳过过期新闻: {item['title'][:30]}...")
-    
-    # 保存更新后的历史链接
-    save_processed_links(processed)
-    
-    # 按发布时间排序（最新的在前）
-    new_items.sort(key=lambda x: x.get('pub_date', ''), reverse=True)
-    
-    # 生成日报
-    html_content = generate_html_report(new_items)
-    with open("index.html", "w", encoding="utf-8") as f:
-        f.write(html_content)
-    
-    print(f"✅ 日报已生成：index.html")
-    print(f"📊 共抓取到 {len(new_items)} 条新动态")
-    print("详细内容请查看 index.html")
-
+# ====================== 主程序 ======================
 if __name__ == "__main__":
-    main()
+    html_content = generate_html_report()
+    filename = "index.html"
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(html_content)
+    print(f"✅ 日报已生成：{filename}")
+    print(f"📊 共 {len(COMPANIES)} 家企业")
