@@ -283,7 +283,3 @@ def get_all_companies():
     return combined[:8]
 
 COMPANIES = get_all_companies()
-
-# ====================== 以下为日报生成、痛点匹配等（保持不变） ======================
-# 注意：以下函数 match_pain_point, get_today_dynamic, generate_html_report 等照旧，无需修改
-# 但由于篇幅，这里只列出关键的改动，以下需要保留你原有的那些函数，继续复制即可。
