@@ -25,7 +25,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial
 .section-a .section-title { background: #fffbeb; color: #d97706; border-left: 6px solid #f59e0b; }
 .section-b .section-title { background: #eff6ff; color: #2563eb; border-left: 6px solid #3b82f6; }
 .card { background: white; border-radius: 12px; padding: 20px 24px; margin-bottom: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); border-left: 5px solid #e2e8f0; }
-.card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
 .card-s { border-left-color: #dc2626; }
 .card-a { border-left-color: #f59e0b; }
 .card-b { border-left-color: #3b82f6; }
@@ -38,7 +37,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial
 .card-pain { background: #fefce8; padding: 12px 16px; border-radius: 8px; margin: 10px 0; border-left: 3px solid #eab308; }
 .card-pain .ptype { font-weight: 700; color: #92400e; }
 .card-pain .pdesc { margin-top: 4px; font-size: 14px; line-height: 1.6; color: #1e293b; }
-.card-stage { font-size: 13px; color: #3b82f6; font-weight: 600; }
 .footer { text-align: center; color: #94a3b8; font-size: 14px; margin-top: 30px; padding: 20px 0; border-top: 1px solid #e2e8f0; }
 @media (max-width: 640px) { .header { flex-direction: column; align-items: start; gap: 12px; } .card { padding: 16px; } }
 </style>
@@ -47,34 +45,55 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial
 <div class="container">
 <div class="header"><h1>📋 北森拓客日报</h1><span class="date">2026年08月10日</span></div>
 <div class="stats">
-<div class="stat-item stat-s"><div class="num">1</div><div class="label">🔴 S级（重大动态）</div></div>
+<div class="stat-item stat-s"><div class="num">6</div><div class="label">🔴 S级（重大动态）</div></div>
 <div class="stat-item stat-a"><div class="num">0</div><div class="label">🟡 A级（近期动态）</div></div>
-<div class="stat-item stat-b"><div class="num">2</div><div class="label">🔵 B级（关注中）</div></div>
-<div class="stat-item"><div class="num">3</div><div class="label">📊 总企业数</div></div>
+<div class="stat-item stat-b"><div class="num">0</div><div class="label">🔵 B级（关注中）</div></div>
+<div class="stat-item"><div class="num">6</div><div class="label">📊 总企业数</div></div>
 </div>
-<div class="section section-s"><div class="section-title">🔴 S级 · 重大动态（融资/IPO进展）</div>
+<div class="section section-s"><div class="section-title">🔴 S级 · 重大动态（融资/IPO）</div>
 <div class="card card-s">
-<div class="card-header"><span class="card-name">智平方</span><span class="card-tag">具身智能</span></div>
-<div class="card-info"><span>👥 快速扩张中</span><span>💰 估值超200亿元</span><span>📍 深圳</span><span class="card-stage">📌 高速融资扩张期</span></div>
-<div class="card-dynamic">📰 2026年6月完成近50亿元融资（来源：投资者网）</div>
-<div class="card-pain"><div class="ptype">💡 核心痛点：融资后快速扩张，组织管理跟不上</div><div class="pdesc">🎯 切入点：贵公司近期完成融资【估值超200亿元】，员工规模快速扩张——组织层级从扁平变成多级。北森一体化HCM平台，让组织调整在系统内分钟级完成。</div></div>
-</div>
-</div><div class="section section-b"><div class="section-title">🔵 B级 · 关注中</div>
-<div class="card card-b">
 <div class="card-header"><span class="card-name">逐际动力</span><span class="card-tag">具身智能</span></div>
-<div class="card-info"><span>👥 快速扩张中</span><span>💰 Pre-IPO轮近2亿美元</span><span>📍 深圳</span><span class="card-stage">📌 Pre-IPO冲刺期</span></div>
-<div class="card-dynamic">📰 加速人形机器人商业化落地（来源：公司官网）</div>
-<div class="card-pain"><div class="ptype">💡 核心痛点：IPO合规管理刚需</div><div class="pdesc">🎯 切入点：贵公司正处于IPO关键期【Pre-IPO冲刺期】，上市合规对人力资源管理有严格要求——招聘流程可追溯、绩效数据可审计、薪酬体系规范化。北森已服务多家上市企业，可提供合规级HR管理方案。</div></div>
+<div class="card-info"><span>👥 快速扩张中</span><span>📍 深圳</span><span class="card-stage">📌 Pre-IPO冲刺期</span></div>
+<div class="card-dynamic">📰 2026年7月14日完成近2亿美元Pre-IPO轮融资（来源：新华社）</div>
+<div class="card-pain"><div class="ptype">💡 IPO合规管理刚需</div><div class="pdesc">🎯 贵公司正处于IPO关键期，北森可提供合规级HR管理方案，确保招聘、绩效、薪酬全流程可追溯、可审计。</div></div>
 </div>
 
-<div class="card card-b">
+<div class="card card-s">
 <div class="card-header"><span class="card-name">埃芯半导体</span><span class="card-tag">半导体</span></div>
-<div class="card-info"><span>👥 近300人（研发占60%）</span><span>💰 B+轮近10亿元</span><span>📍 深圳/西安/惠州</span><span class="card-stage">📌 快速扩张期</span></div>
-<div class="card-dynamic">📰 累计出货突破100台（来源：公司官网）</div>
-<div class="card-pain"><div class="ptype">💡 核心痛点：研发驱动型，人才争夺激烈</div><div class="pdesc">🎯 切入点：贵公司【60%】是研发人员——在深圳激烈的人才争夺战中，北森从招聘到绩效到发展的全链路人才管理，帮您系统性打赢人才战。</div></div>
+<div class="card-info"><span>👥 近300人</span><span>📍 深圳</span><span class="card-stage">📌 快速扩张期</span></div>
+<div class="card-dynamic">📰 2026年7月29日完成近10亿元B+轮融资（来源：投资界）</div>
+<div class="card-pain"><div class="ptype">💡 融资后快速扩张，组织管理跟不上</div><div class="pdesc">🎯 贵公司融资后组织层级复杂化，北森一体化HCM平台帮助组织调整分钟级完成，权限配置自动化。</div></div>
+</div>
+
+<div class="card card-s">
+<div class="card-header"><span class="card-name">智平方</span><span class="card-tag">具身智能</span></div>
+<div class="card-info"><span>👥 快速扩张中</span><span>📍 深圳</span><span class="card-stage">📌 高速融资扩张期</span></div>
+<div class="card-dynamic">📰 2026年6月完成近50亿元融资（来源：投资者网）</div>
+<div class="card-pain"><div class="ptype">💡 融资后快速扩张，组织管理跟不上</div><div class="pdesc">🎯 贵公司融资后组织层级复杂化，北森一体化HCM平台帮助组织调整分钟级完成，权限配置自动化。</div></div>
+</div>
+
+<div class="card card-s">
+<div class="card-header"><span class="card-name">地瓜机器人</span><span class="card-tag">具身智能</span></div>
+<div class="card-info"><span>👥 300+人</span><span>📍 深圳</span><span class="card-stage">📌 规模化扩张期</span></div>
+<div class="card-dynamic">📰 2026年4月完成B2轮1.5亿美元融资（来源：36氪）</div>
+<div class="card-pain"><div class="ptype">💡 融资后快速扩张，组织管理跟不上</div><div class="pdesc">🎯 贵公司融资后组织层级复杂化，北森一体化HCM平台帮助组织调整分钟级完成，权限配置自动化。</div></div>
+</div>
+
+<div class="card card-s">
+<div class="card-header"><span class="card-name">众擎机器人</span><span class="card-tag">具身智能</span></div>
+<div class="card-info"><span>👥 130+人</span><span>📍 深圳</span><span class="card-stage">📌 量产交付突破期</span></div>
+<div class="card-dynamic">📰 2026年4月完成2亿美元B轮融资（来源：投资界）</div>
+<div class="card-pain"><div class="ptype">💡 组织管理数字化升级</div><div class="pdesc">🎯 北森一体化HCM平台帮助实现人力资源全链路数字化，提升组织效能。</div></div>
+</div>
+
+<div class="card card-s">
+<div class="card-header"><span class="card-name">星尘智能</span><span class="card-tag">具身智能</span></div>
+<div class="card-info"><span>👥 151人</span><span>📍 深圳</span><span class="card-stage">📌 股改完成，冲刺IPO</span></div>
+<div class="card-dynamic">📰 三个月内完成3轮融资超10亿元（来源：36氪）</div>
+<div class="card-pain"><div class="ptype">💡 IPO合规管理刚需</div><div class="pdesc">🎯 贵公司正处于IPO关键期，北森可提供合规级HR管理方案，确保招聘、绩效、薪酬全流程可追溯、可审计。</div></div>
 </div>
 </div>
-<div class="footer">数据来源：公开新闻报道（36氪、投资界、量子位等）<br>本日报由自动化系统生成，仅供内部业务拓展参考</div>
+<div class="footer">数据来源：公开RSS订阅源（36氪、投资界、量子位、动点科技等）<br>本日报由自动化系统生成，仅供内部业务拓展参考</div>
 </div>
 </body>
 </html>

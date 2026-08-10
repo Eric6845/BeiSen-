@@ -8,59 +8,82 @@ import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
-# ====================== RSS 数据源配置 ======================
+# ====================== 1. RSS 数据源配置 ======================
 RSS_SOURCES = [
-    {"name": "36氪_投融资", "url": "https://36kr.com/feed", "type": "rss"},
-    {"name": "投资界", "url": "https://pe.pedaily.cn/rss/", "type": "rss"},
-    {"name": "量子位", "url": "https://www.qbitai.com/feed", "type": "rss"},
-    {"name": "动点科技", "url": "https://www.technode.com/feed", "type": "rss"},
-    {"name": "机器之心", "url": "https://www.jiqizhixin.com/rss", "type": "rss"}
+    {"name": "36氪_投融资", "url": "https://36kr.com/feed"},
+    {"name": "投资界", "url": "https://pe.pedaily.cn/rss/"},
+    {"name": "量子位", "url": "https://www.qbitai.com/feed"},
+    {"name": "动点科技", "url": "https://www.technode.com/feed"},
+    {"name": "机器之心", "url": "https://www.jiqizhixin.com/rss"},
+    # 下面的源可能不稳定，暂时注释掉，后续可手工开启
+    # {"name": "IT桔子", "url": "https://www.itjuzi.com/feed"},
+    # {"name": "猎云网", "url": "https://www.lieyunwang.com/feed"},
+    # {"name": "亿欧网", "url": "https://www.iyiou.com/feed"},
 ]
 
-# ====================== 公司名提取工具 ======================
-COMPANY_SUFFIX = r'(?:科技|技术|智能|机器人|半导体|芯片|能源|生物|医药|医疗|信息|网络|数据|云|软件|硬件|系统|集成|装备|制造|材料|光电|微电子|电子|通信|自动化|无人机|航天|航空)'
-COMPANY_PATTERN = re.compile(r'([\u4e00-\u9fa5a-zA-Z0-9·]{2,10}?(?:' + COMPANY_SUFFIX + r'|公司|集团|有限|股份|有限公|集团有限))')
+# ====================== 2. 公司名提取工具（增强版） ======================
+# 匹配中文公司名称（含常用后缀）
+CN_COMPANY_PATTERN = re.compile(
+    r'([\u4e00-\u9fa5a-zA-Z0-9·]{2,12}?(?:科技|技术|智能|机器人|半导体|芯片|能源|生物|医药|医疗|信息|网络|数据|云|软件|硬件|系统|集成|装备|制造|材料|光电|微电子|电子|通信|自动化|无人机|航天|航空|公司|集团|有限|股份))'
+)
+# 匹配"XXX完成融资"、"XXX获投资"等句式（用于提取公司名）
+FINANCE_PATTERN = re.compile(
+    r'([\u4e00-\u9fa5a-zA-Z0-9·]{2,12}?)(?:宣布|完成|获|融资|投资|获得|新一轮|亿元|千万)'
+)
+# 匹配英文公司名（常见于动点科技等英文标题）
+EN_COMPANY_PATTERN = re.compile(
+    r'\b([A-Z][a-z]+(?:[A-Z][a-z]+)*)\s+(?:Raises|Secures|Closes|Announces|Launches|Acquires|Partners|Unveils|Introduces)'
+)
 
 def extract_company_name(text):
+    """从文本中提取公司名，返回第一个匹配到的名称，否则返回 None"""
     if not text:
         return None
-    matches = COMPANY_PATTERN.findall(text)
-    if matches:
-        name = matches[0]
-        for prefix in ['深圳', '北京', '上海', '广州', '杭州', '成都', '武汉', '南京', '苏州']:
+    # 优先匹配中文公司后缀
+    m = CN_COMPANY_PATTERN.search(text)
+    if m:
+        name = m.group(1)
+        # 去除地域前缀
+        for prefix in ['深圳', '北京', '上海', '广州', '杭州', '成都', '武汉', '南京', '苏州', '天津', '重庆']:
             if name.startswith(prefix):
                 name = name[len(prefix):]
                 break
         return name.strip()
+    # 其次匹配“完成融资”句式
+    m2 = FINANCE_PATTERN.search(text)
+    if m2:
+        candidate = m2.group(1).strip()
+        # 过滤掉明显不是公司名的词
+        exclude = ['项目', '产品', '平台', '系统', '技术', '方案', '服务', '企业', '行业', '市场', '领域', '中国', '团队']
+        if len(candidate) >= 2 and candidate not in exclude:
+            return candidate
+    # 最后尝试匹配英文公司名（如 "DeepSeek Raises ..."）
+    m3 = EN_COMPANY_PATTERN.search(text)
+    if m3:
+        return m3.group(1)
     return None
 
-# ====================== RSS 抓取函数 ======================
-def fetch_rss_feed(url, max_entries=20):
+# ====================== 3. RSS 抓取函数（健壮版） ======================
+def fetch_rss_feed(url, max_entries=30):
+    """
+    抓取 RSS 源，返回文章列表。如果解析失败，返回空列表。
+    """
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-        resp = requests.get(url, headers=headers, timeout=10)
+        resp = requests.get(url, headers=headers, timeout=15)
         resp.raise_for_status()
-        root = ET.fromstring(resp.content)
-        ns = {'': ''}
+        # 有些源返回的内容不是严格的 XML，尝试用 UTF-8 解码
+        content = resp.content
+        try:
+            root = ET.fromstring(content)
+        except ET.ParseError:
+            # 如果解析失败，尝试用正则提取 <item> 或 <entry> 内容
+            # 这里简单返回空，因为很多源格式不标准，我们跳过
+            print(f"   ⚠️ XML 解析失败: {url[:50]}...")
+            return []
+        # 处理 RSS 2.0
         channel = root.find('channel')
-        if channel is None:
-            items = root.findall('entry')
-            if not items:
-                return []
-            articles = []
-            for entry in items[:max_entries]:
-                title = entry.find('title')
-                link = entry.find('link')
-                updated = entry.find('updated')
-                summary = entry.find('summary')
-                articles.append({
-                    'title': title.text if title is not None else '',
-                    'link': link.get('href') if link is not None and link.get('href') else '',
-                    'pub_date': updated.text if updated is not None else '',
-                    'description': summary.text if summary is not None else ''
-                })
-            return articles
-        else:
+        if channel is not None:
             items = channel.findall('item')
             articles = []
             for item in items[:max_entries]:
@@ -75,126 +98,164 @@ def fetch_rss_feed(url, max_entries=20):
                     'description': description.text if description is not None else ''
                 })
             return articles
+        # 处理 Atom 格式
+        entries = root.findall('entry')
+        if entries:
+            articles = []
+            for entry in entries[:max_entries]:
+                title = entry.find('title')
+                link = entry.find('link')
+                updated = entry.find('updated')
+                summary = entry.find('summary')
+                articles.append({
+                    'title': title.text if title is not None else '',
+                    'link': link.get('href') if link is not None and link.get('href') else '',
+                    'pub_date': updated.text if updated is not None else '',
+                    'description': summary.text if summary is not None else ''
+                })
+            return articles
+        return []
     except Exception as e:
-        print(f"⚠️ 抓取 RSS 失败: {url} - {e}")
+        print(f"   ⚠️ 抓取异常: {url} - {e}")
         return []
 
-# ====================== 公司信息生成（含严格/宽松模式） ======================
+# ====================== 4. 公司信息构建（筛选逻辑） ======================
 def build_company_from_article(article, source_name, strict=True):
-    title = article.get('title', '')
-    desc = article.get('description', '')
-    link = article.get('link', '')
-    pub_date = article.get('pub_date', '')
-    
+    """
+    从一篇文章中提取公司信息，如果符合条件则返回公司字典，否则返回 None。
+    strict=True: 严格模式（深圳 + 新兴赛道 + 高成长融资）
+    strict=False: 宽松模式（一线城市 + 泛科技/制造 + 合作/发布等）
+    """
+    title = article.get('title', '') or ''
+    desc = article.get('description', '') or ''
+    link = article.get('link', '') or ''
+    # 合并文本用于关键词匹配
+    full_text = (title + " " + desc).strip()
+    if len(full_text) < 10:
+        return None
+
+    # 提取公司名
     company_name = extract_company_name(title) or extract_company_name(desc)
     if not company_name:
+        # 不打印太多日志，避免刷屏
         return None
-    
-    # 城市判断
+    # 如果提取到的公司名太短或像普通词汇，过滤掉
+    if len(company_name) < 2 or company_name in ['数据', '技术', '平台', '系统', '产品', '项目']:
+        return None
+
+    # ---- 1. 城市判断 ----
     if strict:
-        is_location_ok = '深圳' in title or '深圳' in desc or '深圳' in company_name
+        # 严格模式必须包含“深圳”
+        is_location_ok = '深圳' in full_text
     else:
-        location_keywords = ['深圳', '广州', '东莞', '佛山', '香港', '澳门', '北京', '上海', '杭州', '成都', '武汉', '南京', '苏州', '天津', '重庆']
-        is_location_ok = any(kw in title or kw in desc or kw in company_name for kw in location_keywords)
+        # 宽松模式允许一线及新一线城市
+        city_keywords = ['深圳', '北京', '上海', '广州', '杭州', '成都', '武汉', '南京', '苏州', '天津', '重庆', '西安', '长沙', '郑州', '青岛', '大连', '厦门', '合肥']
+        is_location_ok = any(kw in full_text for kw in city_keywords)
     if not is_location_ok:
         return None
-    
-    # 赛道判断
+
+    # ---- 2. 赛道判断 ----
+    track_keywords_strict = ['机器', '智能', '半导', '芯片', 'AI', '人工智', '低空', '无人', '新能源', '储能', '生物', '医药', '合成', '航天']
+    track_keywords_loose = ['机器', '智能', '半导', '芯片', 'AI', '人工智', '低空', '无人', '新能源', '储能', '生物', '医药', '合成', '航天',
+                           '科技', '技术', '软件', '硬件', '电子', '通信', '光电', '装备', '制造', '材料', '医疗', '健康', '环保', '能源']
     if strict:
-        track_keywords = ['机器', '智能', '半导', '芯片', 'AI', '人工智', '低空', '无人', '新能源', '储能', '生物', '医药', '合成', '航天']
+        is_track = any(kw in full_text for kw in track_keywords_strict)
     else:
-        track_keywords = ['机器', '智能', '半导', '芯片', 'AI', '人工智', '低空', '无人', '新能源', '储能', '生物', '医药', '合成', '航天',
-                          '科技', '技术', '软件', '硬件', '电子', '通信', '光电', '装备', '制造', '材料', '医疗', '健康', '环保', '能源']
-    is_track = any(kw in title or kw in desc for kw in track_keywords)
+        is_track = any(kw in full_text for kw in track_keywords_loose)
     if not is_track:
         return None
-    
-    # 高成长判断
+
+    # ---- 3. 高成长判断 ----
+    growth_strict = ['融资', '投资', '获', '完成', '亿元', '千万', '万美元', '新一轮', '天使', 'A轮', 'B轮', 'C轮']
+    growth_loose = ['融资', '投资', '获', '完成', '亿元', '千万', '万美元', '战略', '合作', '发布', '推出', '量产', '基地', '签约', '落地', '增长', '扩张']
     if strict:
-        growth_strict = ['融资', '投资', '获', '完成', '亿元', '千万', '万美元']
-        is_growth = any(kw in title or kw in desc for kw in growth_strict)
+        is_growth = any(kw in full_text for kw in growth_strict)
     else:
-        growth_keywords = ['融资', '投资', '增长', '扩张', '获', '完成', '亿元', '千万', '万美元', '战略', '合作', '发布', '推出', '量产', '基地', '签约', '落地']
-        is_growth = any(kw in title or kw in desc for kw in growth_keywords)
+        is_growth = any(kw in full_text for kw in growth_loose)
     if not is_growth:
         return None
-    
-    # 排除头部
-    blacklist = ['腾讯', '阿里', '百度', '华为', '字节', '美团', '京东', '网易', '小米', '拼多多', '滴滴', '大疆']
-    if any(b in company_name for b in blacklist):
+
+    # ---- 4. 排除头部企业 ----
+    blacklist = ['腾讯', '阿里', '阿里巴巴', '百度', '华为', '字节', '字节跳动', '美团', '京东', '网易', '小米', '拼多多', '滴滴', '大疆']
+    if any(b in company_name or b in full_text for b in blacklist):
         return None
-    
-    # 构造公司字典
+
+    # ---- 5. 构造公司信息 ----
+    # 动态内容（至少一条）
     dynamics = [f"{title}（来源：{source_name}）"]
     if link:
         dynamics.append(f"详情：{link}")
-    
+
+    # 赛道分类
     track = '其他'
-    if any(kw in company_name or kw in title for kw in ['机器', '智能']):
+    if any(kw in full_text for kw in ['机器', '智能']):
         track = '具身智能/机器人'
-    elif any(kw in company_name or kw in title for kw in ['半导', '芯片']):
+    elif any(kw in full_text for kw in ['半导', '芯片']):
         track = '半导体'
-    elif any(kw in company_name or kw in title for kw in ['AI', '人工智']):
+    elif any(kw in full_text for kw in ['AI', '人工智']):
         track = '人工智能'
-    elif any(kw in company_name or kw in title for kw in ['低空', '无人']):
+    elif any(kw in full_text for kw in ['低空', '无人']):
         track = '低空经济'
-    elif any(kw in company_name or kw in title for kw in ['新能源', '储能']):
+    elif any(kw in full_text for kw in ['新能源', '储能']):
         track = '新能源'
-    elif any(kw in company_name or kw in title for kw in ['生物', '医药', '合成']):
+    elif any(kw in full_text for kw in ['生物', '医药', '合成']):
         track = '生物医药'
-    elif any(kw in company_name or kw in title for kw in ['科技', '软件', '硬件']):
+    elif any(kw in full_text for kw in ['科技', '软件', '硬件']):
         track = '科技'
-    elif any(kw in company_name or kw in title for kw in ['制造', '装备']):
+    elif any(kw in full_text for kw in ['制造', '装备']):
         track = '制造'
-    
-    employees = '未知'
-    finance = ''
-    branches = '推测'
-    if '深圳' in title or '深圳' in desc:
-        branches = '深圳'
-    elif any(kw in title or kw in desc for kw in ['广州', '东莞', '佛山']):
-        branches = '粤港澳大湾区'
-    
-    if '融资' in title or '融资' in desc:
+
+    # 城市信息
+    branches = '未知'
+    for city in ['深圳', '北京', '上海', '广州', '杭州', '成都', '武汉', '南京', '苏州', '天津']:
+        if city in full_text:
+            branches = city
+            break
+
+    # 发展阶段
+    if any(kw in full_text for kw in ['融资', '投资', 'A轮', 'B轮', 'C轮']):
         stage = '快速扩张期'
-    elif 'IPO' in title or '上市' in title:
+    elif any(kw in full_text for kw in ['IPO', '上市', 'Pre-IPO']):
         stage = 'IPO冲刺期'
-    elif '合作' in title or '合作' in desc:
+    elif any(kw in full_text for kw in ['合作', '战略合作']):
         stage = '战略合作期'
-    elif '发布' in title or '发布' in desc:
+    elif any(kw in full_text for kw in ['发布', '推出']):
         stage = '产品发布期'
     else:
         stage = '成长期'
-    
+
     return {
         "name": company_name,
         "track": track,
-        "employees": employees,
-        "finance": finance,
+        "employees": '未知',
+        "finance": '',
         "branches": branches,
-        "rd_ratio": "",
-        "honor": "",
+        "rd_ratio": '',
+        "honor": '',
         "stage": stage,
         "dynamics": dynamics
     }
 
-# ====================== 抓取 RSS 并返回公司列表（支持严格/宽松） ======================
+# ====================== 5. 抓取主函数 ======================
 def fetch_companies_from_rss(strict=True):
     all_companies = []
     seen_names = set()
+    mode = "严格" if strict else "宽松"
+    print(f"🔍 开始 {mode} 抓取...")
     for source in RSS_SOURCES:
         articles = fetch_rss_feed(source['url'])
-        mode = "严格" if strict else "宽松"
-        print(f"📡 {source['name']} ({mode}) 抓取到 {len(articles)} 篇文章")
+        print(f"📡 {source['name']} 抓取到 {len(articles)} 篇文章")
         for article in articles:
             company = build_company_from_article(article, source['name'], strict=strict)
             if company and company['name'] not in seen_names:
                 seen_names.add(company['name'])
                 all_companies.append(company)
-        time.sleep(1)
+                print(f"   ✅ 通过: {company['name']} ({company['track']})")
+        time.sleep(0.5)  # 礼貌间隔
+    print(f"✅ {mode} 抓取完成，共 {len(all_companies)} 家合格公司")
     return all_companies
 
-# ====================== 手动保底名单 ======================
+# ====================== 6. 手动保底名单 ======================
 MANUAL_COMPANIES = [
     {
         "name": "逐际动力",
@@ -205,28 +266,18 @@ MANUAL_COMPANIES = [
         "rd_ratio": "高",
         "honor": "",
         "stage": "Pre-IPO冲刺期",
-        "dynamics": [
-            "2026年7月14日完成近2亿美元Pre-IPO轮融资（来源：新华社）",
-            "半年内累计吸金4亿美元（来源：36氪）",
-            "加速人形机器人商业化落地（来源：公司官网）",
-            "与多家车企达成战略合作（来源：猎豹资讯）"
-        ]
+        "dynamics": ["2026年7月14日完成近2亿美元Pre-IPO轮融资（来源：新华社）"]
     },
     {
         "name": "埃芯半导体",
         "track": "半导体",
-        "employees": "近300人（研发占60%）",
+        "employees": "近300人",
         "finance": "B+轮近10亿元",
-        "branches": "深圳/西安/惠州",
+        "branches": "深圳",
         "rd_ratio": "60%",
         "honor": "国家级专精特新小巨人",
         "stage": "快速扩张期",
-        "dynamics": [
-            "2026年7月29日完成近10亿元B+轮融资（来源：投资界）",
-            "累计出货突破100台（来源：公司官网）",
-            "西安研发中心正式启用（来源：陕西日报）",
-            "获评国家级专精特新重点小巨人（来源：工信部）"
-        ]
+        "dynamics": ["2026年7月29日完成近10亿元B+轮融资（来源：投资界）"]
     },
     {
         "name": "智平方",
@@ -237,82 +288,104 @@ MANUAL_COMPANIES = [
         "rd_ratio": "高",
         "honor": "新晋独角兽",
         "stage": "高速融资扩张期",
-        "dynamics": [
-            "2026年6月完成近50亿元融资（来源：投资者网）",
-            "一年内完成12轮融资（来源：36氪）",
-            "成为大湾区首个200亿具身智能独角兽（来源：南方日报）"
-        ]
-    }
+        "dynamics": ["2026年6月完成近50亿元融资（来源：投资者网）"]
+    },
+    {
+        "name": "地瓜机器人",
+        "track": "具身智能",
+        "employees": "300+人",
+        "finance": "B轮累计2.7亿美元",
+        "branches": "深圳",
+        "rd_ratio": "高",
+        "honor": "新晋独角兽",
+        "stage": "规模化扩张期",
+        "dynamics": ["2026年4月完成B2轮1.5亿美元融资（来源：36氪）"]
+    },
+    {
+        "name": "众擎机器人",
+        "track": "具身智能",
+        "employees": "130+人",
+        "finance": "B轮2亿美元",
+        "branches": "深圳",
+        "rd_ratio": "90%",
+        "honor": "新晋独角兽",
+        "stage": "量产交付突破期",
+        "dynamics": ["2026年4月完成2亿美元B轮融资（来源：投资界）"]
+    },
+    {
+        "name": "星尘智能",
+        "track": "具身智能",
+        "employees": "151人",
+        "finance": "三个月融资超10亿元",
+        "branches": "深圳",
+        "rd_ratio": "高",
+        "honor": "",
+        "stage": "股改完成，冲刺IPO",
+        "dynamics": ["三个月内完成3轮融资超10亿元（来源：36氪）"]
+    },
+    {
+        "name": "跨维智能",
+        "track": "具身智能",
+        "employees": "快速扩张中",
+        "finance": "估值超100亿元",
+        "branches": "深圳",
+        "rd_ratio": "高",
+        "honor": "",
+        "stage": "IPO筹备期",
+        "dynamics": ["完成10亿元B轮融资（来源：经济参考报）"]
+    },
 ]
 
-# ====================== 主数据源函数：智能宽松 ======================
+# ====================== 7. 主入口函数 ======================
 def get_all_companies():
+    # 先严格抓取
     strict_companies = fetch_companies_from_rss(strict=True)
-    print(f"✅ 严格抓取到 {len(strict_companies)} 家合格公司")
     if len(strict_companies) >= 6:
         return strict_companies[:8]
-    
+    # 否则宽松抓取
     loose_companies = fetch_companies_from_rss(strict=False)
-    print(f"✅ 宽松抓取到 {len(loose_companies)} 家合格公司")
-    
+    # 合并去重
     combined = strict_companies.copy()
     existing_names = set(c['name'] for c in combined)
     for comp in loose_companies:
         if comp['name'] not in existing_names:
             combined.append(comp)
             existing_names.add(comp['name'])
-    
+    # 如果仍少于6家，补足手动名单
     if len(combined) < 6:
         for manual in MANUAL_COMPANIES:
             if manual['name'] not in existing_names:
                 combined.append(manual)
                 existing_names.add(manual['name'])
-            if len(combined) >= 8:
+            if len(combined) >= 6:
                 break
+    # 限制返回最多8家
     return combined[:8]
 
-COMPANIES = get_all_companies()
-
-# ====================== 痛点匹配 ======================
+# ====================== 8. 痛点匹配（精简版） ======================
 def match_pain_point(company):
-    name = company["name"]
-    finance = company.get("finance", "")
     stage = company.get("stage", "")
-    rd = company.get("rd_ratio", "")
-    branches = company.get("branches", "")
-    honor = company.get("honor", "")
-
-    if any(kw in stage or kw in finance for kw in ["IPO", "上市", "股改", "Pre-IPO", "递表", "受理", "辅导"]):
+    if any(kw in stage for kw in ["IPO", "Pre-IPO", "冲刺"]):
         return {
             "type": "IPO合规管理刚需",
-            "desc": f"贵公司正处于IPO关键期【{stage}】，上市合规对人力资源管理有严格要求——招聘流程可追溯、绩效数据可审计、薪酬体系规范化。北森已服务多家上市企业，可提供合规级HR管理方案。"
+            "desc": "贵公司正处于IPO关键期，北森可提供合规级HR管理方案，确保招聘、绩效、薪酬全流程可追溯、可审计。"
         }
-    if "融资" in finance or "估值" in finance or "融资" in stage:
+    if any(kw in stage for kw in ["扩张", "融资", "增长"]):
         return {
             "type": "融资后快速扩张，组织管理跟不上",
-            "desc": f"贵公司近期完成融资【{finance}】，员工规模快速扩张——组织层级从扁平变成多级。北森一体化HCM平台，让组织调整在系统内分钟级完成。"
+            "desc": "贵公司融资后组织层级复杂化，北森一体化HCM平台帮助组织调整分钟级完成，权限配置自动化。"
         }
-    if rd and "研发" in rd or "半导" in company.get("track", ""):
+    if "半导体" in company.get("track", "") or "研发" in company.get("employees", ""):
         return {
             "type": "研发驱动型，人才争夺激烈",
-            "desc": f"贵公司【{rd if rd else '高比例'}】是研发人员——在深圳激烈的人才争夺战中，北森从招聘到绩效到发展的全链路人才管理，帮您系统性打赢人才战。"
-        }
-    if "/" in branches or "全球" in branches or "多国" in branches:
-        return {
-            "type": "多地域/全球化布局",
-            "desc": f"贵公司在{branches}多地布局——北森全球人力一体化方案，支持多语言、多时区、多币种，一套系统管全球。"
-        }
-    if "最佳雇主" in honor:
-        return {
-            "type": "最佳雇主认证，HR体系升级需求",
-            "desc": "恭喜贵公司荣获'最佳雇主'称号！北森一体化HCM平台帮您把人才管理的理念落地为系统化的制度与数据。"
+            "desc": "贵公司研发人员占比高，北森全链路人才管理帮您从招聘、绩效到发展系统性打赢人才战。"
         }
     return {
         "type": "组织管理数字化升级",
-        "desc": f"贵公司处于{stage}，员工规模持续增长。北森一体化HCM平台可帮助企业实现人力资源全链路数字化管理。"
+        "desc": "北森一体化HCM平台帮助实现人力资源全链路数字化，提升组织效能。"
     }
 
-# ====================== 动态选取（基于日期种子） ======================
+# ====================== 9. 动态选取（基于日期） ======================
 def get_today_dynamic(company):
     today = datetime.now()
     seed = today.year * 10000 + today.month * 100 + today.day
@@ -323,12 +396,12 @@ def get_today_dynamic(company):
     idx = (seed + name_hash) % len(dyn_list)
     return dyn_list[idx]
 
-# ====================== 生成HTML日报 ======================
+# ====================== 10. 生成 HTML 日报 ======================
 def generate_html_report():
     today_str = datetime.now().strftime("%Y年%m月%d日")
     s_list, a_list, b_list = [], [], []
 
-    all_companies = get_all_companies()  # 实时获取，保证最新
+    all_companies = get_all_companies()  # 实时获取最新
 
     if not all_companies:
         return f"""
@@ -339,7 +412,6 @@ def generate_html_report():
 <h1>📋 北森拓客日报</h1>
 <p style="color:#64748b;">{today_str}</p>
 <p style="font-size:18px;color:#3b82f6;">今日暂无符合条件的动态更新，请明天再查看。</p>
-<p style="color:#94a3b8;font-size:14px;">数据源：RSS抓取 + 手动维护</p>
 </body>
 </html>
 """
@@ -350,9 +422,9 @@ def generate_html_report():
         comp["today_dynamic"] = dynamic
         comp["pain_point"] = pain
 
-        if any(kw in dynamic for kw in ["融资", "IPO", "上市", "递表", "受理", "辅导", "Pre-IPO"]):
+        if any(kw in dynamic for kw in ["融资", "IPO", "上市", "Pre-IPO", "A轮", "B轮"]):
             s_list.append(comp)
-        elif any(kw in dynamic for kw in ["合作", "扩张", "量产", "发布", "基地", "获奖"]):
+        elif any(kw in dynamic for kw in ["合作", "发布", "量产", "战略", "签约"]):
             a_list.append(comp)
         else:
             b_list.append(comp)
@@ -384,7 +456,6 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Aria
 .section-a .section-title {{ background: #fffbeb; color: #d97706; border-left: 6px solid #f59e0b; }}
 .section-b .section-title {{ background: #eff6ff; color: #2563eb; border-left: 6px solid #3b82f6; }}
 .card {{ background: white; border-radius: 12px; padding: 20px 24px; margin-bottom: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); border-left: 5px solid #e2e8f0; }}
-.card:hover {{ box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
 .card-s {{ border-left-color: #dc2626; }}
 .card-a {{ border-left-color: #f59e0b; }}
 .card-b {{ border-left-color: #3b82f6; }}
@@ -397,7 +468,6 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Aria
 .card-pain {{ background: #fefce8; padding: 12px 16px; border-radius: 8px; margin: 10px 0; border-left: 3px solid #eab308; }}
 .card-pain .ptype {{ font-weight: 700; color: #92400e; }}
 .card-pain .pdesc {{ margin-top: 4px; font-size: 14px; line-height: 1.6; color: #1e293b; }}
-.card-stage {{ font-size: 13px; color: #3b82f6; font-weight: 600; }}
 .footer {{ text-align: center; color: #94a3b8; font-size: 14px; margin-top: 30px; padding: 20px 0; border-top: 1px solid #e2e8f0; }}
 @media (max-width: 640px) {{ .header {{ flex-direction: column; align-items: start; gap: 12px; }} .card {{ padding: 16px; }} }}
 </style>
@@ -413,36 +483,41 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Aria
 </div>
 """
 
-    for level, items, label in [("s", s_list, "S级 · 重大动态（融资/IPO进展）"),
-                                ("a", a_list, "A级 · 近期动态（合作/扩张/发布）"),
-                                ("b", b_list, "B级 · 关注中")]:
+    for level, items, label in [
+        ("s", s_list, "S级 · 重大动态（融资/IPO）"),
+        ("a", a_list, "A级 · 近期动态（合作/发布）"),
+        ("b", b_list, "B级 · 关注中")
+    ]:
         if items:
-            html += f'<div class="section section-{level}"><div class="section-title">{"🔴" if level=="s" else "🟡" if level=="a" else "🔵"} {label}</div>'
+            emoji = "🔴" if level == "s" else "🟡" if level == "a" else "🔵"
+            html += f'<div class="section section-{level}"><div class="section-title">{emoji} {label}</div>'
             for comp in items:
                 pain = comp["pain_point"]
                 html += f"""
 <div class="card card-{level}">
 <div class="card-header"><span class="card-name">{comp['name']}</span><span class="card-tag">{comp['track']}</span></div>
-<div class="card-info"><span>👥 {comp['employees']}</span><span>💰 {comp['finance']}</span><span>📍 {comp['branches']}</span><span class="card-stage">📌 {comp['stage']}</span></div>
+<div class="card-info"><span>👥 {comp['employees']}</span><span>📍 {comp['branches']}</span><span class="card-stage">📌 {comp['stage']}</span></div>
 <div class="card-dynamic">📰 {comp['today_dynamic']}</div>
-<div class="card-pain"><div class="ptype">💡 核心痛点：{pain['type']}</div><div class="pdesc">🎯 切入点：{pain['desc']}</div></div>
+<div class="card-pain"><div class="ptype">💡 {pain['type']}</div><div class="pdesc">🎯 {pain['desc']}</div></div>
 </div>
 """
             html += '</div>'
 
     html += f"""
-<div class="footer">数据来源：公开新闻报道（36氪、投资界、量子位等）<br>本日报由自动化系统生成，仅供内部业务拓展参考</div>
+<div class="footer">数据来源：公开RSS订阅源（36氪、投资界、量子位、动点科技等）<br>本日报由自动化系统生成，仅供内部业务拓展参考</div>
 </div>
 </body>
 </html>
 """
     return html
 
-# ====================== 主程序 ======================
+# ====================== 11. 主程序 ======================
 if __name__ == "__main__":
     html_content = generate_html_report()
     filename = "index.html"
     with open(filename, "w", encoding="utf-8") as f:
         f.write(html_content)
+    # 重新读取 COMPANIES 数量用于显示
+    companies = get_all_companies()
     print(f"✅ 日报已生成：{filename}")
-    print(f"📊 共 {len(COMPANIES)} 家企业")
+    print(f"📊 共 {len(companies)} 家企业")
