@@ -1,483 +1,193 @@
 # -*- coding: utf-8 -*-
 import os
 import json
-import random
-from datetime import datetime
+import re
+import time
+from datetime import datetime, timedelta
+import urllib.request
+import urllib.parse
+import xml.etree.ElementTree as ET
 
-# ====================== 1. 真实企业数据库（硬编码） ======================
-COMPANIES = [
+# ====================== 1. 数据源配置 ======================
+# 这里配置你要抓取的 RSS 源，可随时增删
+DATA_SOURCES = [
     {
-        "name": "逐际动力",
-        "track": "具身智能",
-        "employees": "快速扩张中",
-        "finance": "Pre-IPO轮近2亿美元，估值150亿元",
-        "branches": "深圳",
-        "rd_ratio": "高",
-        "honor": "",
-        "stage": "Pre-IPO冲刺期",
-        "dynamics": [
-            "2026年7月14日完成近2亿美元Pre-IPO轮融资，投后估值150亿元（来源：新华社）",
-            "半年内累计吸金4亿美元，成为资本宠儿（来源：36氪）",
-            "加速人形机器人商业化落地，团队持续扩张（来源：公司官网）",
-            "与多家车企达成战略合作，探索工业场景应用（来源：猎豹资讯）",
-            "启动IPO辅导，预计2027年登陆港股（来源：证监会公告）",
-            "发布新一代双足机器人，运动能力大幅提升（来源：机器之心）",
-            "完成B+轮融资，老股东持续跟投（来源：天眼查）",
-            "入选2026年度潜在独角兽榜单（来源：长城战略咨询）"
-        ]
+        "name": "36氪_投融资",
+        "url": "https://36kr.com/feed",
+        "type": "rss"
     },
     {
-        "name": "埃芯半导体",
-        "track": "半导体",
-        "employees": "近300人（研发占60%）",
-        "finance": "B+轮近10亿元",
-        "branches": "深圳/西安/惠州",
-        "rd_ratio": "60%",
-        "honor": "国家级专精特新小巨人",
-        "stage": "快速扩张期",
-        "dynamics": [
-            "2026年7月29日完成近10亿元B+轮融资（来源：投资界）",
-            "累计出货突破100台，国产替代加速（来源：公司官网）",
-            "研发团队博士硕士占比超70%（来源：36氪）",
-            "西安研发中心正式启用（来源：陕西日报）",
-            "与国内头部晶圆厂达成长期供货协议（来源：证券时报）",
-            "获评国家级专精特新重点小巨人（来源：工信部）",
-            "启动C轮融资筹备（来源：企查查）",
-            "发布新一代薄膜量测设备（来源：半导体行业观察）"
-        ]
+        "name": "投资界",
+        "url": "https://pe.pedaily.cn/rss/",
+        "type": "rss"
     },
-    {
-        "name": "智平方",
-        "track": "具身智能",
-        "employees": "快速扩张中",
-        "finance": "估值超200亿元，融资近50亿元",
-        "branches": "深圳",
-        "rd_ratio": "高",
-        "honor": "新晋独角兽",
-        "stage": "高速融资扩张期",
-        "dynamics": [
-            "2026年6月完成近50亿元融资，估值突破200亿元（来源：投资者网）",
-            "一年内完成12轮融资（来源：36氪）",
-            "成为大湾区首个200亿具身智能独角兽（来源：南方日报）",
-            "量产基地落地深圳（来源：公司官网）",
-            "与多所高校共建联合实验室（来源：搜狐）",
-            "推出通用具身智能大模型（来源：机器之心）",
-            "员工较年初增长300%（来源：招聘网站）",
-            "入选2026中国AI高成长企业Top10（来源：亿欧）"
-        ]
-    },
-    {
-        "name": "自变量机器人",
-        "track": "具身智能",
-        "employees": "快速扩张中",
-        "finance": "估值破200亿元",
-        "branches": "深圳",
-        "rd_ratio": "高",
-        "honor": "",
-        "stage": "连续融资爆发期",
-        "dynamics": [
-            "连续完成B、B+、B++、C轮四轮融资（来源：经济参考报）",
-            "30+家投资机构集中入场（来源：36氪）",
-            "核心团队来自头部科技公司（来源：公司官网）",
-            "发布行业首个可量产通用具身智能体（来源：机器之心）",
-            "深圳总部扩租，办公面积翻倍（来源：写字楼租赁）",
-            "启动大规模校招，计划招聘200+算法工程师（来源：校园招聘）",
-            "与供应链龙头达成战略合作（来源：证券时报）",
-            "获评2026最值得关注硬科技企业（来源：投资家）"
-        ]
-    },
-    {
-        "name": "众擎机器人",
-        "track": "具身智能",
-        "employees": "130+人（研发占90%）",
-        "finance": "B轮2亿美元，估值破百亿",
-        "branches": "深圳（红花岭基地）",
-        "rd_ratio": "90%",
-        "honor": "新晋独角兽",
-        "stage": "量产交付突破期",
-        "dynamics": [
-            "2026年4月完成2亿美元B轮融资（来源：投资界）",
-            "红花岭基地正式启用，迈向万台级交付（来源：公司官网）",
-            "研发人员占比高达90%（来源：36氪）",
-            "发布新一代通用人形机器人（来源：机器之心）",
-            "与汽车制造企业达成批量采购（来源：证券时报）",
-            "启动C轮融资，目标估值200亿元（来源：企查查）",
-            "获评2026深圳瞪羚企业（来源：深圳工信局）",
-            "计划年底扩张至300人（来源：招聘网站）"
-        ]
-    },
-    {
-        "name": "地瓜机器人",
-        "track": "具身智能",
-        "employees": "300+人",
-        "finance": "B轮累计2.7亿美元",
-        "branches": "深圳",
-        "rd_ratio": "高",
-        "honor": "新晋独角兽",
-        "stage": "规模化扩张期",
-        "dynamics": [
-            "2026年4月完成B2轮1.5亿美元融资（来源：36氪）",
-            "2025年度深圳新晋独角兽（来源：中商产业研究院）",
-            "算法团队从0到40+人（来源：公司官网）",
-            "营收目标同比增长50%以上（来源：行业分析）",
-            "发布机器人操作系统新版本（来源：机器之心）",
-            "获评国家级高新技术企业（来源：科技部）",
-            "启动C轮融资筹备（来源：企查查）",
-            "员工从30多人扩张至300多人（来源：公开报道）"
-        ]
-    },
-    {
-        "name": "星尘智能",
-        "track": "具身智能",
-        "employees": "151人",
-        "finance": "三个月融资超10亿元",
-        "branches": "深圳",
-        "rd_ratio": "高",
-        "honor": "",
-        "stage": "股改完成，冲刺IPO",
-        "dynamics": [
-            "三个月内完成3轮融资超10亿元（来源：36氪）",
-            "已完成股改，变更为股份有限公司（来源：企查查）",
-            "全球首个绳驱AI机器人量产公司（来源：公司官网）",
-            "启动上市辅导，计划2027年科创板（来源：证监会公告）",
-            "研发人员占比超80%（来源：搜狐）",
-            "与多家头部企业达成战略合作（来源：投资界）",
-            "深圳总部扩编，增设研发中心（来源：招聘信息）",
-            "获评2026最具投资价值企业（来源：投资家）"
-        ]
-    },
-    {
-        "name": "跨维智能",
-        "track": "具身智能",
-        "employees": "快速扩张中",
-        "finance": "估值超100亿元",
-        "branches": "深圳",
-        "rd_ratio": "高",
-        "honor": "",
-        "stage": "IPO筹备期",
-        "dynamics": [
-            "完成10亿元B轮融资，估值超100亿元（来源：经济参考报）",
-            "考虑香港IPO（来源：证券时报）",
-            "跨入百亿估值俱乐部（来源：投资界）",
-            "发布新一代具身智能抓取系统（来源：机器之心）",
-            "深圳总部启用新办公区（来源：公司官网）",
-            "获评专精特新企业（来源：工信部）",
-            "与京东物流达成合作（来源：物流行业观察）",
-            "B+轮融资即将关闭（来源：企查查）"
-        ]
-    },
-    {
-        "name": "普渡科技",
-        "track": "具身智能",
-        "employees": "100-499人",
-        "finance": "近10亿元融资",
-        "branches": "全球多国",
-        "rd_ratio": "高",
-        "honor": "",
-        "stage": "全球化扩张期",
-        "dynamics": [
-            "2026年4月完成近10亿元融资（来源：36氪）",
-            "从低谷500人重新扩张（来源：公司动态）",
-            "产品覆盖全球多个国家（来源：公司官网）",
-            "发布新款商用服务机器人（来源：机器之心）",
-            "深圳总部升级为全球运营中心（来源：搜狐）",
-            "启动新一轮招聘，重点补充海外人才（来源：招聘网站）",
-            "获评2026中国机器人独角兽Top10（来源：亿欧）",
-            "与全球多家餐饮巨头达成战略合作（来源：投资界）"
-        ]
-    },
-    {
-        "name": "时创意",
-        "track": "半导体",
-        "employees": "1000+人",
-        "finance": "2025年营收42.71亿元",
-        "branches": "深圳",
-        "rd_ratio": "高",
-        "honor": "国家级专精特新小巨人",
-        "stage": "IPO冲刺期",
-        "dynamics": [
-            "创业板IPO已受理（来源：深交所公告）",
-            "近三年营收复合增长47.95%（来源：招股书）",
-            "2025年营收42.71亿元，净利润5.77亿元（来源：招股书）",
-            "国家级专精特新重点小巨人（来源：工信部）",
-            "深圳总部扩产，新增多条产线（来源：公司官网）",
-            "研发投入占比超10%（来源：招股书）",
-            "获评2025深圳高成长企业Top10（来源：深圳工信局）",
-            "员工突破千人，组织管理面临上市合规要求（来源：企查查）"
-        ]
-    },
-    {
-        "name": "云豹智能",
-        "track": "半导体",
-        "employees": "快速扩张中",
-        "finance": "估值142.73亿元",
-        "branches": "深圳",
-        "rd_ratio": "高",
-        "honor": "",
-        "stage": "IPO冲刺期",
-        "dynamics": [
-            "创业板IPO已受理（来源：深交所公告）",
-            "DPU芯片累计销量超8万颗（来源：公司官网）",
-            "获评2026深圳独角兽（来源：中商产业研究院）",
-            "完成C轮融资（来源：投资界）",
-            "研发团队超300人（来源：36氪）",
-            "与云计算巨头达成战略合作（来源：证券时报）",
-            "深圳研发中心扩编（来源：招聘网站）",
-            "发布第二代DPU芯片（来源：半导体行业观察）"
-        ]
-    },
-    {
-        "name": "楠菲微电子",
-        "track": "半导体",
-        "employees": "快速扩张中",
-        "finance": "C轮超10亿元",
-        "branches": "深圳",
-        "rd_ratio": "高",
-        "honor": "新晋独角兽",
-        "stage": "上市辅导期",
-        "dynamics": [
-            "完成超10亿元C轮融资（来源：投资界）",
-            "启动上市辅导（来源：投资界）",
-            "2025年度深圳新晋独角兽（来源：中商产业研究院）",
-            "聚焦网络通信芯片国产化（来源：公司官网）",
-            "获评国家级高新技术企业（来源：科技部）",
-            "与知名高校共建联合实验室（来源：搜狐）",
-            "启动D轮融资筹备，估值目标200亿元（来源：企查查）",
-            "客户覆盖国内头部通信设备商（来源：证券时报）"
-        ]
-    },
-    {
-        "name": "亿道信息",
-        "track": "AI/智能硬件",
-        "employees": "1600+人（研发占40%+）",
-        "finance": "已上市",
-        "branches": "深圳",
-        "rd_ratio": "40%+",
-        "honor": "最佳雇主企业发展奖",
-        "stage": "稳定成长期",
-        "dynamics": [
-            "荣膺第十二届深圳最佳雇主企业发展奖（来源：深圳商报）",
-            "设千万安居计划吸引保留核心人才（来源：公司官网）",
-            "研发人员占比超40%（来源：年报）",
-            "发布多款AI PC及智能硬件新品（来源：36氪）",
-            "深圳总部扩大研发中心规模（来源：招聘信息）",
-            "获评国家级专精特新企业（来源：工信部）",
-            "营收持续增长（来源：公司公告）",
-            "启动新一轮人才引进计划（来源：公司官网）"
-        ]
-    },
-    {
-        "name": "古瑞瓦特",
-        "track": "新能源",
-        "employees": "1000-2999人",
-        "finance": "递表港交所",
-        "branches": "深圳/惠州/西安/全球190国",
-        "rd_ratio": "高（研发团队超1100人）",
-        "honor": "",
-        "stage": "IPO冲刺期",
-        "dynamics": [
-            "再次递表港交所（来源：港交所公告）",
-            "研发团队超1100人（来源：公司官网）",
-            "业务覆盖全球190个国家和地区（来源：招股书）",
-            "深圳/惠州/西安三地研发中心联动（来源：招聘信息）",
-            "储能业务高速增长（来源：行业分析）",
-            "获评国家级高新技术企业（来源：科技部）",
-            "全球光伏逆变器出货量稳居前列（来源：第三方咨询）",
-            "启动全球人才招募计划（来源：公司官网）"
-        ]
-    },
-    {
-        "name": "合壹新能",
-        "track": "新能源",
-        "employees": "快速扩张中",
-        "finance": "A+轮数亿元",
-        "branches": "深圳/天津/河源/金华",
-        "rd_ratio": "高",
-        "honor": "",
-        "stage": "快速扩张期",
-        "dynamics": [
-            "完成数亿元A+轮融资（来源：投资界）",
-            "聚焦固态电池新兴赛道（来源：公司官网）",
-            "深圳/天津/河源/金华四地布局（来源：招聘信息）",
-            "融资用于产线建设及核心团队扩充（来源：36氪）",
-            "获评国家级科技型中小企业（来源：科技部）",
-            "与多家头部车企达成合作意向（来源：证券时报）",
-            "员工规模较年初翻倍（来源：企查查）",
-            "启动B轮融资（来源：投资界）"
-        ]
-    },
-    {
-        "name": "硕日新能",
-        "track": "新能源",
-        "employees": "162人",
-        "finance": "已启动上市辅导",
-        "branches": "深圳",
-        "rd_ratio": "高",
-        "honor": "",
-        "stage": "IPO辅导期",
-        "dynamics": [
-            "2026年1月启动上市辅导（来源：证监会公告）",
-            "聚焦光伏新能源领域（来源：公司官网）",
-            "国家级高新技术企业（来源：科技部）",
-            "深圳总部启动扩招计划（来源：招聘网站）",
-            "营收持续增长（来源：行业分析）",
-            "获评专精特新企业（来源：工信部）",
-            "与多家头部光伏企业达成战略合作（来源：证券时报）",
-            "辅导进展顺利（来源：企查查）"
-        ]
-    },
-    {
-        "name": "中科欣扬",
-        "track": "生物医药",
-        "employees": "100-499人",
-        "finance": "亿元级融资",
-        "branches": "深圳",
-        "rd_ratio": "高",
-        "honor": "",
-        "stage": "融资后快速扩张期",
-        "dynamics": [
-            "2026年7月31日完成亿元级融资（来源：投资界）",
-            "AI+BT合成生物平台搭建中（来源：公司官网）",
-            "融资用于产业化落地及团队扩充（来源：36氪）",
-            "获评国家级高新技术企业（来源：科技部）",
-            "多条管线布局合成生物学方向（来源：搜狐）",
-            "深圳总部扩编，启动大规模招聘（来源：招聘网站）",
-            "与知名高校共建联合实验室（来源：南方日报）",
-            "获评2026最具创新力生物医药企业（来源：亿欧）"
-        ]
-    },
-    {
-        "name": "达普生物",
-        "track": "生物医药",
-        "employees": "研发团队近百人",
-        "finance": "B+轮超1.2亿元",
-        "branches": "深圳",
-        "rd_ratio": "高",
-        "honor": "",
-        "stage": "融资扩张期",
-        "dynamics": [
-            "完成超1.2亿元B+轮融资（来源：投资界）",
-            "半年内连续完成三笔交割（来源：36氪）",
-            "聚焦生命科学工具（来源：公司官网）",
-            "研发团队近百人（来源：招聘信息）",
-            "深圳总部升级为全球研发中心（来源：公司动态）",
-            "获评国家级科技型中小企业（来源：科技部）",
-            "多款产品实现进口替代（来源：证券时报）",
-            "启动C轮融资筹备（来源：企查查）"
-        ]
-    },
-    {
-        "name": "边界智控",
-        "track": "低空经济",
-        "employees": "快速扩张中",
-        "finance": "B轮超1亿元",
-        "branches": "深圳",
-        "rd_ratio": "高",
-        "honor": "",
-        "stage": "融资扩张期",
-        "dynamics": [
-            "完成超1亿元B轮融资（来源：投资界）",
-            "专注eVTOL飞控系统（来源：公司官网）",
-            "资金用于适航认证及量产能力建设（来源：36氪）",
-            "荣登2026低空经济10强（来源：行业评选）",
-            "深圳总部启动大规模招聘（来源：招聘网站）",
-            "与多家eVTOL整机企业达成合作（来源：证券时报）",
-            "获评国家级高新技术企业（来源：科技部）",
-            "适航认证进展顺利（来源：公司官网）"
-        ]
-    },
-    {
-        "name": "云圣智能",
-        "track": "低空经济",
-        "employees": "成长期",
-        "finance": "持续融资中",
-        "branches": "深圳",
-        "rd_ratio": "高",
-        "honor": "",
-        "stage": "快速扩张期",
-        "dynamics": [
-            "荣登2026低空经济10强（来源：行业评选）",
-            "AI+低空经济深度融合（来源：公司官网）",
-            "完成新一轮融资（来源：投资界）",
-            "深圳总部扩编（来源：招聘信息）",
-            "获评国家级专精特新企业（来源：工信部）",
-            "与多地政府达成合作项目（来源：证券时报）",
-            "市场占有率持续提升（来源：行业分析）",
-            "启动上市筹备工作（来源：企查查）"
-        ]
-    }
+    # 可继续添加其他 RSS，例如 TechCrunch、量子位等
 ]
 
-# ====================== 2. 痛点匹配 ======================
-def match_pain_point(company):
-    name = company["name"]
-    finance = company["finance"]
-    stage = company["stage"]
-    rd = company.get("rd_ratio", "")
-    branches = company.get("branches", "")
-    honor = company.get("honor", "")
+# ====================== 2. 筛选规则（完全基于你之前的五大标准） ======================
+# 深圳关键词
+KEYWORDS_CITY = ["深圳", "鹏城", "深", "SZ"]
+# 新兴赛道关键词（只要提及任一即算）
+KEYWORDS_INDUSTRY = [
+    "具身智能", "机器人", "半导体", "芯片", "AI", "人工智能", 
+    "低空经济", "新能源", "储能", "生物医药", "合成生物", "智能硬件"
+]
+# 高成长关键词（融资、扩张等）
+KEYWORDS_GROWTH = ["融资", "估值", "独角兽", "瞪羚", "专精特新", "IPO", "上市", "扩张", "亿元"]
 
-    if any(kw in stage or kw in finance for kw in ["IPO", "上市", "股改", "Pre-IPO", "递表", "受理", "辅导"]):
-        return {
-            "type": "IPO合规管理刚需",
-            "desc": f"贵公司正处于IPO关键期【{stage}】，上市合规对人力资源管理有严格要求——招聘流程可追溯、绩效数据可审计、薪酬体系规范化。北森已服务多家上市企业，可提供合规级HR管理方案。"
-        }
+# 排除关键词（避免头部巨头，这些关键词出现则过滤掉）
+KEYWORDS_EXCLUDE = ["腾讯", "阿里巴巴", "百度", "字节", "京东", "美团", "网易", "拼多多", "滴滴", "小米", "华为", "中兴", "比亚迪"]
 
-    if "融资" in finance or "估值" in finance:
-        return {
-            "type": "融资后快速扩张，组织管理跟不上",
-            "desc": f"贵公司近期完成多轮融资【{finance}】，员工规模快速扩张——组织层级从扁平变成多级。北森一体化HCM平台，让组织调整在系统内分钟级完成。"
-        }
+def is_relevant(title, summary):
+    """
+    判断一条新闻是否符合条件：
+    1. 提到深圳或深圳企业
+    2. 属于新兴赛道
+    3. 有高成长特征（融资、扩张等）
+    4. 不包含排除关键词
+    """
+    text = (title + " " + summary).lower()
+    # 1. 检查城市
+    city_ok = any(kw in text for kw in [k.lower() for k in KEYWORDS_CITY])
+    if not city_ok:
+        return False
+    # 2. 检查行业
+    industry_ok = any(kw in text for kw in [k.lower() for k in KEYWORDS_INDUSTRY])
+    if not industry_ok:
+        return False
+    # 3. 检查成长特征
+    growth_ok = any(kw in text for kw in [k.lower() for k in KEYWORDS_GROWTH])
+    if not growth_ok:
+        return False
+    # 4. 检查排除词
+    exclude_ok = not any(kw in text for kw in [k.lower() for k in KEYWORDS_EXCLUDE])
+    if not exclude_ok:
+        return False
+    return True
 
-    if "研发" in rd or "算法" in name or "半导体" in company["track"]:
-        return {
-            "type": "研发驱动型，人才争夺激烈",
-            "desc": f"贵公司【{rd if rd else '高比例'}】是研发人员——在深圳激烈的人才争夺战中，北森从招聘到绩效到发展的全链路人才管理，帮您系统性打赢人才战。"
-        }
+# ====================== 3. 抓取函数 ======================
+def fetch_rss(url):
+    """抓取 RSS 并返回条目列表，每条为字典 {title, link, pub_date, summary}"""
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = response.read()
+        root = ET.fromstring(data)
+        # 查找所有 item 元素（RSS 标准）
+        items = []
+        for item in root.findall('.//item'):
+            title = item.find('title').text if item.find('title') is not None else ''
+            link = item.find('link').text if item.find('link') is not None else ''
+            pub_date = item.find('pubDate').text if item.find('pubDate') is not None else ''
+            description = item.find('description').text if item.find('description') is not None else ''
+            # 清洗 description 中的 HTML 标签
+            description = re.sub('<[^<]+?>', '', description)
+            items.append({
+                'title': title.strip(),
+                'link': link.strip(),
+                'pub_date': pub_date.strip(),
+                'summary': description.strip()[:500]  # 截取前500字符
+            })
+        return items
+    except Exception as e:
+        print(f"抓取 {url} 失败: {e}")
+        return []
 
-    if "/" in branches or "全球" in branches or "多国" in branches:
-        return {
-            "type": "多地域/全球化布局",
-            "desc": f"贵公司在{branches}多地布局——北森全球人力一体化方案，支持多语言、多时区、多币种，一套系统管全球。"
-        }
+# ====================== 4. 去重机制（用文件记录已处理链接） ======================
+HISTORY_FILE = "processed_links.txt"
 
-    if "最佳雇主" in honor:
-        return {
-            "type": "最佳雇主认证，HR体系升级需求",
-            "desc": "恭喜贵公司荣获'最佳雇主'称号！北森一体化HCM平台帮您把人才管理的理念落地为系统化的制度与数据。"
-        }
+def load_processed_links():
+    """加载历史处理过的链接列表"""
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+            return set(line.strip() for line in f.readlines())
+    return set()
 
-    return {
-        "type": "组织管理数字化升级",
-        "desc": f"贵公司处于{stage}，员工规模持续增长。北森一体化HCM平台可帮助企业实现人力资源全链路数字化管理。"
-    }
+def save_processed_links(links):
+    """保存处理过的链接"""
+    with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+        for link in links:
+            f.write(link + '\n')
 
-# ====================== 3. 动态选取 ======================
-def get_today_dynamic(company):
-    today = datetime.now()
-    seed = today.year * 10000 + today.month * 100 + today.day
-    name_hash = sum([ord(c) for c in company["name"]])
-    idx = (seed + name_hash) % len(company["dynamics"])
-    return company["dynamics"][idx]
+# ====================== 5. 从新闻中提取公司名和赛道（简单启发式） ======================
+def extract_company_and_track(title, summary):
+    """
+    尝试从标题和摘要中提取一个公司名称和所属赛道。
+    这里采用简单策略：寻找常见公司名称关键词，或根据行业关键词分配赛道。
+    """
+    text = title + " " + summary
+    # 先尝试匹配常见的公司名模式（“XX公司”、“XX完成融资”等）
+    # 简单起见，我们优先从标题中提取
+    # 优先查找“XX完成”、“XX获得”等前面的词
+    patterns = [
+        r'([\u4e00-\u9fa5]{2,6})公司',
+        r'([\u4e00-\u9fa5]{2,6})完成',
+        r'([\u4e00-\u9fa5]{2,6})获得',
+        r'([\u4e00-\u9fa5]{2,6})宣布',
+    ]
+    company = "未知企业"
+    for pat in patterns:
+        match = re.search(pat, title)
+        if match:
+            company = match.group(1)
+            break
+    # 如果还是未知，尝试从摘要中找
+    if company == "未知企业":
+        for pat in patterns:
+            match = re.search(pat, summary)
+            if match:
+                company = match.group(1)
+                break
+    
+    # 确定赛道：看文本中出现了哪个行业关键词
+    track = "其他"
+    for kw in KEYWORDS_INDUSTRY:
+        if kw in text:
+            track = kw
+            break
+    
+    return company, track
 
-# ====================== 4. 生成HTML ======================
-def generate_html_report():
+# ====================== 6. 生成日报 ======================
+def generate_html_report(news_items):
+    """
+    根据抓取到的新闻列表生成 HTML 日报。
+    每条新闻视为一个“企业动态”，并尝试生成痛点话术（根据内容匹配）。
+    """
     today_str = datetime.now().strftime("%Y年%m月%d日")
+    
+    # 如果没有新闻，显示无更新
+    if not news_items:
+        return f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>北森拓客日报 {today_str}</title></head>
+<body>
+<h1>📋 北森拓客日报</h1>
+<p>今日暂无符合条件的动态更新，请明天再查看。</p>
+<p>日期：{today_str}</p>
+</body>
+</html>
+"""
+    
+    # 按时间排序（假设 pub_date 存在，若无则用当前时间）
+    for item in news_items:
+        if not item.get('pub_date'):
+            item['pub_date'] = datetime.now().strftime("%a, %d %b %Y %H:%M:%S GMT")
+    
+    # 分类：S级（融资/IPO重大）、A级（合作/扩张）、B级（普通）
     s_list, a_list, b_list = [], [], []
-
-    for comp in COMPANIES:
-        dynamic = get_today_dynamic(comp)
-        pain = match_pain_point(comp)
-        comp["today_dynamic"] = dynamic
-        comp["pain_point"] = pain
-
-        if any(kw in dynamic for kw in ["融资", "IPO", "上市", "递表", "受理", "辅导", "Pre-IPO"]):
-            s_list.append(comp)
-        elif any(kw in dynamic for kw in ["合作", "扩张", "量产", "发布", "基地", "获奖"]):
-            a_list.append(comp)
+    for item in news_items:
+        text = item['title'] + " " + item['summary']
+        if any(kw in text for kw in ["融资", "IPO", "上市", "递表", "受理", "辅导", "Pre-IPO"]):
+            s_list.append(item)
+        elif any(kw in text for kw in ["合作", "扩张", "量产", "发布", "基地", "获奖"]):
+            a_list.append(item)
         else:
-            b_list.append(comp)
-
+            b_list.append(item)
+    
+    # 构建HTML
     html = f"""
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -530,38 +240,97 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Aria
 <div class="stat-item stat-s"><div class="num">{len(s_list)}</div><div class="label">🔴 S级（重大动态）</div></div>
 <div class="stat-item stat-a"><div class="num">{len(a_list)}</div><div class="label">🟡 A级（近期动态）</div></div>
 <div class="stat-item stat-b"><div class="num">{len(b_list)}</div><div class="label">🔵 B级（关注中）</div></div>
-<div class="stat-item"><div class="num">{len(COMPANIES)}</div><div class="label">📊 总企业数</div></div>
+<div class="stat-item"><div class="num">{len(news_items)}</div><div class="label">📊 总动态数</div></div>
 </div>
 """
 
-    for level, items, label in [("s", s_list, "S级 · 重大动态（融资/IPO进展）"), ("a", a_list, "A级 · 近期动态（合作/扩张/发布）"), ("b", b_list, "B级 · 关注中")]:
+    # 渲染各层级
+    for level, items, label in [
+        ('s', s_list, 'S级 · 重大动态（融资/IPO进展）'),
+        ('a', a_list, 'A级 · 近期动态（合作/扩张/发布）'),
+        ('b', b_list, 'B级 · 关注中')
+    ]:
         if items:
             html += f'<div class="section section-{level}"><div class="section-title">{"🔴" if level=="s" else "🟡" if level=="a" else "🔵"} {label}</div>'
-            for comp in items:
-                pain = comp["pain_point"]
+            for item in items:
+                # 提取公司名和赛道
+                company, track = extract_company_and_track(item['title'], item['summary'])
+                # 生成痛点话术（根据内容简单匹配）
+                text = item['title'] + " " + item['summary']
+                if any(kw in text for kw in ["IPO", "上市", "递表", "受理", "辅导"]):
+                    pain_type = "IPO合规管理刚需"
+                    pain_desc = "该公司正处于IPO关键阶段，上市合规对人力资源管理有严格要求，北森可提供合规级HR管理方案。"
+                elif any(kw in text for kw in ["融资", "估值"]):
+                    pain_type = "融资后快速扩张，组织管理跟不上"
+                    pain_desc = "该公司近期获得融资，员工规模快速扩张，组织层级复杂化，北森一体化HCM平台可帮助分钟级完成组织调整。"
+                elif any(kw in text for kw in ["研发", "算法", "芯片", "半导体"]):
+                    pain_type = "研发驱动型，人才争夺激烈"
+                    pain_desc = "该公司研发人员占比高，在激烈的人才争夺中，北森的全链路人才管理可助其系统性打赢人才战。"
+                else:
+                    pain_type = "组织管理数字化升级"
+                    pain_desc = "该公司处于快速成长期，员工规模持续增长，北森一体化HCM平台可助力其实现人力资源全链路数字化管理。"
+                
                 html += f"""
 <div class="card card-{level}">
-<div class="card-header"><span class="card-name">{comp['name']}</span><span class="card-tag">{comp['track']}</span></div>
-<div class="card-info"><span>👥 {comp['employees']}</span><span>💰 {comp['finance']}</span><span>📍 {comp['branches']}</span><span class="card-stage">📌 {comp['stage']}</span></div>
-<div class="card-dynamic">📰 {comp['today_dynamic']}</div>
-<div class="card-pain"><div class="ptype">💡 核心痛点：{pain['type']}</div><div class="pdesc">🎯 切入点：{pain['desc']}</div></div>
+<div class="card-header"><span class="card-name">{company}</span><span class="card-tag">{track}</span></div>
+<div class="card-info"><span>📍 深圳</span><span>📰 {item.get('pub_date', '').split(' ')[0]}</span></div>
+<div class="card-dynamic">📰 <a href="{item['link']}" target="_blank">{item['title']}</a><br><span style="font-size:14px;color:#475569;">{item['summary'][:200]}...</span></div>
+<div class="card-pain"><div class="ptype">💡 核心痛点：{pain_type}</div><div class="pdesc">🎯 切入点：{pain_desc}</div></div>
 </div>
 """
             html += '</div>'
 
     html += f"""
-<div class="footer">数据来源：公开新闻报道（36氪、投资界、新华社、深交所等）<br>本日报由自动化系统生成，仅供内部业务拓展参考</div>
+<div class="footer">数据来源：实时抓取自公开RSS（36氪、投资界等）<br>本日报由自动化系统生成，仅供内部业务拓展参考</div>
 </div>
 </body>
 </html>
 """
     return html
 
-# ====================== 5. 主程序 ======================
-if __name__ == "__main__":
-    html_content = generate_html_report()
-    filename = "index.html"
-    with open(filename, "w", encoding="utf-8") as f:
+# ====================== 7. 主程序 ======================
+def main():
+    # 加载历史链接
+    processed = load_processed_links()
+    new_items = []
+    
+    # 遍历所有数据源抓取
+    for source in DATA_SOURCES:
+        print(f"正在抓取: {source['name']}")
+        items = fetch_rss(source['url'])
+        for item in items:
+            link = item['link']
+            # 如果链接已处理过，跳过
+            if link in processed:
+                continue
+            # 筛选
+            if is_relevant(item['title'], item['summary']):
+                # 检查日期是否在最近3天内（避免显示过旧新闻）
+                try:
+                    # 解析 pub_date 格式，如 "Mon, 10 Aug 2026 12:00:00 GMT"
+                    pub = datetime.strptime(item['pub_date'], "%a, %d %b %Y %H:%M:%S %Z")
+                except:
+                    pub = datetime.now()  # 若解析失败则认为是今天
+                if (datetime.now() - pub).days <= 3:
+                    new_items.append(item)
+                    processed.add(link)  # 加入已处理，避免重复
+                else:
+                    print(f"跳过过期新闻: {item['title'][:30]}...")
+    
+    # 保存更新后的历史链接
+    save_processed_links(processed)
+    
+    # 按发布时间排序（最新的在前）
+    new_items.sort(key=lambda x: x.get('pub_date', ''), reverse=True)
+    
+    # 生成日报
+    html_content = generate_html_report(new_items)
+    with open("index.html", "w", encoding="utf-8") as f:
         f.write(html_content)
-    print(f"✅ 日报已生成：{filename}")
-    print(f"📊 共 {len(COMPANIES)} 家企业")
+    
+    print(f"✅ 日报已生成：index.html")
+    print(f"📊 共抓取到 {len(new_items)} 条新动态")
+    print("详细内容请查看 index.html")
+
+if __name__ == "__main__":
+    main()
