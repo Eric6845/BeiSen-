@@ -6,16 +6,19 @@ import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
-# ====================== 1. RSS 数据源（使用较稳定的源） ======================
+# ====================== 1. RSS 数据源（已扩充至 8 个） ======================
 RSS_SOURCES = [
     {"name": "36氪", "url": "https://36kr.com/feed"},
     {"name": "投资界", "url": "https://pe.pedaily.cn/rss/"},
     {"name": "创业邦", "url": "https://www.cyzone.cn/feed"},
     {"name": "亿欧网", "url": "https://www.iyiou.com/feed"},
     {"name": "动点科技", "url": "https://www.technode.com/feed"},
+    {"name": "钛媒体", "url": "https://www.tmtpost.com/feed"},
+    {"name": "虎嗅", "url": "https://www.huxiu.com/rss.xml"},
+    {"name": "品玩", "url": "https://www.pingwest.com/feed"},
 ]
 
-# ====================== 2. 公司名提取（加强版） ======================
+# ====================== 2. 公司名提取（增强版） ======================
 CN_PATTERN = re.compile(
     r'([\u4e00-\u9fa5a-zA-Z0-9·]{2,12}?(?:科技|技术|智能|机器人|半导体|芯片|能源|生物|医药|医疗|信息|网络|数据|云|软件|硬件|系统|集成|装备|制造|材料|光电|微电子|电子|通信|自动化|无人机|航天|航空|公司|集团|有限|股份))'
 )
@@ -52,7 +55,7 @@ def extract_company_name(text):
         return m.group(1)
     return None
 
-# ====================== 3. RSS 抓取函数 ======================
+# ====================== 3. RSS 抓取函数（兼容多种格式） ======================
 def fetch_rss_feed(url, max_entries=30, retry=2):
     for attempt in range(retry):
         try:
@@ -66,6 +69,7 @@ def fetch_rss_feed(url, max_entries=30, retry=2):
                 print(f"   ⚠️ 抓取失败 {url}: {e}")
                 return []
             time.sleep(1)
+    # 解析 RSS 2.0
     channel = root.find('channel')
     if channel is not None:
         items = channel.findall('item')
@@ -82,6 +86,7 @@ def fetch_rss_feed(url, max_entries=30, retry=2):
                 'description': description.text if description is not None else ''
             })
         return articles
+    # 解析 Atom
     entries = root.findall('entry')
     if entries:
         articles = []
@@ -99,7 +104,7 @@ def fetch_rss_feed(url, max_entries=30, retry=2):
         return articles
     return []
 
-# ====================== 4. 构建公司信息（宽松模式） ======================
+# ====================== 4. 构建公司信息（优化后的宽松模式） ======================
 def build_company_from_article(article, source_name):
     title = article.get('title', '') or ''
     desc = article.get('description', '') or ''
@@ -114,26 +119,28 @@ def build_company_from_article(article, source_name):
     if len(company_name) < 2 or company_name in ['数据', '技术', '平台', '系统', '产品', '项目', '资本']:
         return None
 
-    # 城市：只要出现中国主要城市即通过
+    # ----- 优化1：城市判断改为“若有则记录，若无则标记为未知，但仍通过” -----
     city_list = ['深圳', '北京', '上海', '广州', '杭州', '成都', '武汉', '南京', '苏州', '天津', '重庆', '西安', '长沙', '郑州', '青岛', '大连', '厦门', '合肥']
     city_found = None
     for city in city_list:
         if city in full_text:
             city_found = city
             break
+    # 不再因城市未命中而返回 None，允许通过
 
-    # 关键词（覆盖赛道和成长性）
+    # ----- 优化2：赛道和成长关键词合并，要求至少命中一个 -----
     keywords = ['机器', '智能', '半导', '芯片', 'AI', '人工智', '低空', '无人', '新能源', '储能', '生物', '医药', '合成', '航天',
                 '科技', '技术', '软件', '硬件', '电子', '通信', '光电', '装备', '制造', '材料', '医疗', '健康', '环保', '能源',
                 '融资', '投资', '获', '完成', '亿元', '千万', '战略', '合作', '发布', '推出', '量产', '基地', '签约', '落地', '增长', '扩张']
     if not any(kw in full_text for kw in keywords):
         return None
 
-    # 排除头部
+    # 排除头部企业
     blacklist = ['腾讯', '阿里', '阿里巴巴', '百度', '华为', '字节', '字节跳动', '美团', '京东', '网易', '小米', '拼多多', '滴滴', '大疆', '谷歌', '微软', '亚马逊']
     if any(b in company_name or b in full_text for b in blacklist):
         return None
 
+    # 构造动态内容
     dynamics = [f"{title}（来源：{source_name}）"]
     if link:
         dynamics.append(f"详情：{link}")
@@ -199,32 +206,33 @@ def fetch_companies_from_rss():
     print(f"✅ 总共抓取到 {len(all_companies)} 家合格公司")
     return all_companies
 
-# ====================== 6. 手动保底名单（确保至少有7家） ======================
+# ====================== 6. 保底名单（精简至5家，仅供不足时补充） ======================
 MANUAL_COMPANIES = [
     {"name": "逐际动力", "track": "具身智能", "employees": "快速扩张中", "finance": "Pre-IPO轮近2亿美元", "branches": "深圳", "stage": "Pre-IPO冲刺期", "dynamics": ["2026年7月14日完成近2亿美元Pre-IPO轮融资（来源：新华社）"]},
     {"name": "埃芯半导体", "track": "半导体", "employees": "近300人", "finance": "B+轮近10亿元", "branches": "深圳", "stage": "快速扩张期", "dynamics": ["2026年7月29日完成近10亿元B+轮融资（来源：投资界）"]},
     {"name": "智平方", "track": "具身智能", "employees": "快速扩张中", "finance": "估值超200亿元", "branches": "深圳", "stage": "高速融资扩张期", "dynamics": ["2026年6月完成近50亿元融资（来源：投资者网）"]},
     {"name": "地瓜机器人", "track": "具身智能", "employees": "300+人", "finance": "B轮累计2.7亿美元", "branches": "深圳", "stage": "规模化扩张期", "dynamics": ["2026年4月完成B2轮1.5亿美元融资（来源：36氪）"]},
     {"name": "众擎机器人", "track": "具身智能", "employees": "130+人", "finance": "B轮2亿美元", "branches": "深圳", "stage": "量产交付突破期", "dynamics": ["2026年4月完成2亿美元B轮融资（来源：投资界）"]},
-    {"name": "星尘智能", "track": "具身智能", "employees": "151人", "finance": "三个月融资超10亿元", "branches": "深圳", "stage": "股改完成", "dynamics": ["三个月内完成3轮融资超10亿元（来源：36氪）"]},
-    {"name": "跨维智能", "track": "具身智能", "employees": "快速扩张中", "finance": "估值超100亿元", "branches": "深圳", "stage": "IPO筹备期", "dynamics": ["完成10亿元B轮融资（来源：经济参考报）"]},
 ]
 
+# ====================== 7. 主入口：优化4（阈值调整为4家） ======================
 def get_all_companies():
     rss_companies = fetch_companies_from_rss()
-    if len(rss_companies) >= 6:
+    # 如果抓取到 4 家及以上，直接返回前8家（不再补充保底）
+    if len(rss_companies) >= 4:
         return rss_companies[:8]
+    # 否则补充保底名单至至少6家
     combined = rss_companies.copy()
     existing = set(c['name'] for c in combined)
     for manual in MANUAL_COMPANIES:
         if manual['name'] not in existing:
             combined.append(manual)
             existing.add(manual['name'])
-        if len(combined) >= 8:
+        if len(combined) >= 6:
             break
     return combined[:8]
 
-# ====================== 7. 痛点匹配 ======================
+# ====================== 8. 痛点匹配 ======================
 def match_pain_point(company):
     stage = company.get("stage", "")
     if "IPO" in stage or "Pre-IPO" in stage:
@@ -245,7 +253,7 @@ def get_today_dynamic(company):
     idx = (seed + name_hash) % len(dyn_list)
     return dyn_list[idx]
 
-# ====================== 8. 生成 HTML ======================
+# ====================== 9. 生成 HTML（与之前一致） ======================
 def generate_html_report():
     today_str = datetime.now().strftime("%Y年%m月%d日")
     all_companies = get_all_companies()
@@ -344,14 +352,14 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Aria
 """
             html += '</div>'
     html += f"""
-<div class="footer">数据来源：公开RSS订阅源（36氪、投资界、创业邦、亿欧网、动点科技）<br>本日报由自动化系统生成，仅供内部业务拓展参考</div>
+<div class="footer">数据来源：公开RSS订阅源（36氪、投资界、创业邦、亿欧网、动点科技、钛媒体、虎嗅、品玩）<br>本日报由自动化系统生成，仅供内部业务拓展参考</div>
 </div>
 </body>
 </html>
 """
     return html
 
-# ====================== 9. 主程序（带异常捕获） ======================
+# ====================== 10. 主程序（带异常捕获） ======================
 if __name__ == "__main__":
     try:
         print("🚀 脚本开始运行...")
@@ -367,7 +375,6 @@ if __name__ == "__main__":
         print(f"❌ 脚本运行出错: {e}")
         import traceback
         traceback.print_exc()
-        # 即使出错也生成一个简单的 index.html，避免网站 404
         try:
             with open("index.html", "w", encoding="utf-8") as f:
                 f.write(f"""
