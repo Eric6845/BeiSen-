@@ -24,7 +24,7 @@ jobs:
         run: pip install requests
 
       - name: 运行脚本生成日报
-        run: python beisen_daily.py
+        run: python -u beisen_daily.py
 
       - name: 部署到 GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
