@@ -6,7 +6,7 @@ import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
-# ====================== 1. RSS 数据源（已扩充至 8 个） ======================
+# ====================== 1. RSS 数据源 ======================
 RSS_SOURCES = [
     {"name": "36氪", "url": "https://36kr.com/feed"},
     {"name": "投资界", "url": "https://pe.pedaily.cn/rss/"},
@@ -18,44 +18,85 @@ RSS_SOURCES = [
     {"name": "品玩", "url": "https://www.pingwest.com/feed"},
 ]
 
-# ====================== 2. 公司名提取（增强版） ======================
+# ====================== 2. 公司名提取（更严谨） ======================
+# 常见公司后缀（中文）
+CN_SUFFIX = r'(?:科技|技术|智能|机器人|半导体|芯片|能源|生物|医药|医疗|信息|网络|数据|云|软件|硬件|系统|集成|装备|制造|材料|光电|微电子|电子|通信|自动化|无人机|航天|航空|公司|集团|有限|股份)'
+# 匹配含中文后缀的公司名，且前面不是“的”等虚词
 CN_PATTERN = re.compile(
-    r'([\u4e00-\u9fa5a-zA-Z0-9·]{2,12}?(?:科技|技术|智能|机器人|半导体|芯片|能源|生物|医药|医疗|信息|网络|数据|云|软件|硬件|系统|集成|装备|制造|材料|光电|微电子|电子|通信|自动化|无人机|航天|航空|公司|集团|有限|股份))'
+    r'(?<![的])([\u4e00-\u9fa5a-zA-Z0-9·]{2,12}?' + CN_SUFFIX + r')'
 )
+# 匹配引号内的公司名（如「智平方」、“地瓜机器人”）
 QUOTE_PATTERN = re.compile(r'[「「『""\']([\u4e00-\u9fa5a-zA-Z0-9·]{2,10}?)[」」』""\']')
+# 匹配“XXX完成/获/宣布融资”句式，并确保XXX不是虚词
 FINANCE_PATTERN = re.compile(
-    r'([\u4e00-\u9fa5a-zA-Z0-9·]{2,12}?)\s*(?:完成|获|宣布|获得|新一轮|亿元|千万|融资|投资|A轮|B轮|C轮)'
+    r'([\u4e00-\u9fa5a-zA-Z0-9·]{2,12}?)\s*(?:宣布|完成|获|获得|新一轮|融资|投资|A轮|B轮|C轮|Pre-IPO|IPO)'
 )
-EN_PATTERN = re.compile(r'\b([A-Z][a-z]+(?:[A-Z][a-z]+)*)\s+(?:Raises|Secures|Closes|Announces|Launches|Acquires|Partners|Unveils|Introduces)')
+# 英文公司名（如 "DeepSeek Raises"），只匹配纯字母且首字母大写的单词
+EN_PATTERN = re.compile(r'\b([A-Z][a-zA-Z]+)\s+(?:Raises|Secures|Closes|Announces|Launches|Acquires|Partners|Unveils|Introduces|Takes|Picks)')
+
+# 黑名单：明显不是公司名的词汇
+BLACKLIST_WORDS = [
+    '项目', '产品', '平台', '系统', '技术', '方案', '服务', '企业', '行业', '市场', '领域', '中国', '团队', '资本', '投资',
+    '对于', '关于', '就是', '不是', '已经', '可以', '没有', '他们', '我们', '什么', '如何', '为什么', '因为', '所以',
+    '一个', '这个', '那个', '这样', '那样', '这些', '那些', '然后', '之后', '终于', '开始', '已经', '都', '也', '还'
+]
+
+def is_valid_company_name(name):
+    """检查提取的名称是否合理"""
+    if not name or len(name) < 2 or len(name) > 20:
+        return False
+    # 必须包含至少一个汉字，或者全是英文字母（英文名）
+    if not re.search(r'[\u4e00-\u9fa5]', name) and not re.match(r'^[A-Za-z]+$', name):
+        return False
+    # 不能包含虚词、停用词
+    if any(w in name for w in BLACKLIST_WORDS):
+        return False
+    # 如果全是英文，长度至少3个字符（避免“AI”等单字母）
+    if re.match(r'^[A-Za-z]+$', name) and len(name) < 3:
+        return False
+    return True
 
 def extract_company_name(text):
+    """从文本中提取公司名，返回第一个合理的候选，否则 None"""
     if not text:
         return None
+    
+    # 1. 优先匹配引号中的名称（最可靠）
     m = QUOTE_PATTERN.search(text)
     if m:
-        name = m.group(1).strip()
-        if len(name) >= 2:
-            return name
-    m = CN_PATTERN.search(text)
-    if m:
-        name = m.group(1)
-        for prefix in ['深圳', '北京', '上海', '广州', '杭州', '成都', '武汉', '南京', '苏州', '天津', '重庆']:
-            if name.startswith(prefix):
-                name = name[len(prefix):]
+        cand = m.group(1).strip()
+        if is_valid_company_name(cand):
+            return cand
+    
+    # 2. 匹配含中文后缀的公司名
+    matches = CN_PATTERN.findall(text)
+    for cand in matches:
+        cand = cand.strip()
+        # 去除常见地域前缀
+        for prefix in ['深圳', '北京', '上海', '广州', '杭州', '成都', '武汉', '南京', '苏州', '天津', '重庆', '西安', '长沙', '郑州', '青岛', '大连', '厦门', '合肥']:
+            if cand.startswith(prefix):
+                cand = cand[len(prefix):]
                 break
-        return name.strip()
-    m = FINANCE_PATTERN.search(text)
-    if m:
-        candidate = m.group(1).strip()
-        exclude = ['项目', '产品', '平台', '系统', '技术', '方案', '服务', '企业', '行业', '市场', '领域', '中国', '团队', '资本', '投资']
-        if len(candidate) >= 2 and candidate not in exclude:
-            return candidate
-    m = EN_PATTERN.search(text)
-    if m:
-        return m.group(1)
+        if is_valid_company_name(cand):
+            return cand
+    
+    # 3. 匹配“XXX融资/投资”句式
+    matches2 = FINANCE_PATTERN.findall(text)
+    for cand in matches2:
+        cand = cand.strip()
+        if is_valid_company_name(cand):
+            return cand
+    
+    # 4. 英文公司名（如 "DeepSeek"）
+    m3 = EN_PATTERN.search(text)
+    if m3:
+        cand = m3.group(1)
+        if is_valid_company_name(cand):
+            return cand
+    
     return None
 
-# ====================== 3. RSS 抓取函数（兼容多种格式） ======================
+# ====================== 3. RSS 抓取函数 ======================
 def fetch_rss_feed(url, max_entries=30, retry=2):
     for attempt in range(retry):
         try:
@@ -104,7 +145,7 @@ def fetch_rss_feed(url, max_entries=30, retry=2):
         return articles
     return []
 
-# ====================== 4. 构建公司信息（优化后的宽松模式） ======================
+# ====================== 4. 构建公司信息（优化筛选） ======================
 def build_company_from_article(article, source_name):
     title = article.get('title', '') or ''
     desc = article.get('description', '') or ''
@@ -113,27 +154,26 @@ def build_company_from_article(article, source_name):
     if len(full_text) < 10:
         return None
 
+    # 先检查是否有相关关键词（融资、科技、AI等），若无则跳过，减少噪音
+    essential_keywords = ['融资', '投资', '获', '完成', '亿元', '千万', '科技', '智能', '半导', '芯片', 'AI', '机器人', '新能源', '生物', '医药', '制造', '硬件', '软件', '战略', '合作', '发布', '量产']
+    if not any(kw in full_text for kw in essential_keywords):
+        return None
+
     company_name = extract_company_name(title) or extract_company_name(desc)
     if not company_name:
         return None
-    if len(company_name) < 2 or company_name in ['数据', '技术', '平台', '系统', '产品', '项目', '资本']:
+
+    # 二次验证：如果公司名是单个汉字或纯数字，拒绝
+    if len(company_name) < 2 or company_name.isdigit():
         return None
 
-    # ----- 优化1：城市判断改为“若有则记录，若无则标记为未知，但仍通过” -----
+    # 城市判断（不强制，若出现则记录）
     city_list = ['深圳', '北京', '上海', '广州', '杭州', '成都', '武汉', '南京', '苏州', '天津', '重庆', '西安', '长沙', '郑州', '青岛', '大连', '厦门', '合肥']
     city_found = None
     for city in city_list:
         if city in full_text:
             city_found = city
             break
-    # 不再因城市未命中而返回 None，允许通过
-
-    # ----- 优化2：赛道和成长关键词合并，要求至少命中一个 -----
-    keywords = ['机器', '智能', '半导', '芯片', 'AI', '人工智', '低空', '无人', '新能源', '储能', '生物', '医药', '合成', '航天',
-                '科技', '技术', '软件', '硬件', '电子', '通信', '光电', '装备', '制造', '材料', '医疗', '健康', '环保', '能源',
-                '融资', '投资', '获', '完成', '亿元', '千万', '战略', '合作', '发布', '推出', '量产', '基地', '签约', '落地', '增长', '扩张']
-    if not any(kw in full_text for kw in keywords):
-        return None
 
     # 排除头部企业
     blacklist = ['腾讯', '阿里', '阿里巴巴', '百度', '华为', '字节', '字节跳动', '美团', '京东', '网易', '小米', '拼多多', '滴滴', '大疆', '谷歌', '微软', '亚马逊']
@@ -192,7 +232,7 @@ def build_company_from_article(article, source_name):
 def fetch_companies_from_rss():
     all_companies = []
     seen_names = set()
-    print("🔍 开始抓取所有 RSS 源（宽松模式）...")
+    print("🔍 开始抓取所有 RSS 源...")
     for source in RSS_SOURCES:
         articles = fetch_rss_feed(source['url'])
         print(f"📡 {source['name']} 抓取到 {len(articles)} 篇文章")
@@ -206,7 +246,7 @@ def fetch_companies_from_rss():
     print(f"✅ 总共抓取到 {len(all_companies)} 家合格公司")
     return all_companies
 
-# ====================== 6. 保底名单（精简至5家，仅供不足时补充） ======================
+# ====================== 6. 保底名单（精简） ======================
 MANUAL_COMPANIES = [
     {"name": "逐际动力", "track": "具身智能", "employees": "快速扩张中", "finance": "Pre-IPO轮近2亿美元", "branches": "深圳", "stage": "Pre-IPO冲刺期", "dynamics": ["2026年7月14日完成近2亿美元Pre-IPO轮融资（来源：新华社）"]},
     {"name": "埃芯半导体", "track": "半导体", "employees": "近300人", "finance": "B+轮近10亿元", "branches": "深圳", "stage": "快速扩张期", "dynamics": ["2026年7月29日完成近10亿元B+轮融资（来源：投资界）"]},
@@ -215,13 +255,11 @@ MANUAL_COMPANIES = [
     {"name": "众擎机器人", "track": "具身智能", "employees": "130+人", "finance": "B轮2亿美元", "branches": "深圳", "stage": "量产交付突破期", "dynamics": ["2026年4月完成2亿美元B轮融资（来源：投资界）"]},
 ]
 
-# ====================== 7. 主入口：优化4（阈值调整为4家） ======================
+# ====================== 7. 主入口 ======================
 def get_all_companies():
     rss_companies = fetch_companies_from_rss()
-    # 如果抓取到 4 家及以上，直接返回前8家（不再补充保底）
     if len(rss_companies) >= 4:
         return rss_companies[:8]
-    # 否则补充保底名单至至少6家
     combined = rss_companies.copy()
     existing = set(c['name'] for c in combined)
     for manual in MANUAL_COMPANIES:
@@ -232,7 +270,7 @@ def get_all_companies():
             break
     return combined[:8]
 
-# ====================== 8. 痛点匹配 ======================
+# ====================== 8. 痛点匹配、动态选取、HTML生成（不变） ======================
 def match_pain_point(company):
     stage = company.get("stage", "")
     if "IPO" in stage or "Pre-IPO" in stage:
@@ -253,7 +291,6 @@ def get_today_dynamic(company):
     idx = (seed + name_hash) % len(dyn_list)
     return dyn_list[idx]
 
-# ====================== 9. 生成 HTML（与之前一致） ======================
 def generate_html_report():
     today_str = datetime.now().strftime("%Y年%m月%d日")
     all_companies = get_all_companies()
@@ -359,7 +396,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Aria
 """
     return html
 
-# ====================== 10. 主程序（带异常捕获） ======================
+# ====================== 主程序 ======================
 if __name__ == "__main__":
     try:
         print("🚀 脚本开始运行...")
